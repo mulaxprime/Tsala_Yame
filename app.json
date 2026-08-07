@@ -1,0 +1,37 @@
+{
+  "name": "MULAA",
+  "description": "multi device Whatsapp bot",
+  "logo": "https://files.catbox.moe/kgsd4q.jpeg",
+  "keywords": ["bot"],
+  "success_url": "/",
+
+  "env": {
+    "SESSION_ID": {
+      "description": "Put the session-id here.",
+      "required": true
+    },  
+
+    "ALIVE_IMG": {
+      "description": "Put your alive img here.",
+      "required": true
+    },
+    
+    "ALIVE_MSG": {
+      "description": "Put your alive msg here.",
+      "required": true
+    }
+
+    "AUTO_READ_STATUS": {
+
+      "description": "make it true if you want bot to view status.",
+      "required": true
+    }
+},
+
+     "buildpacks": [
+        {
+            "url": "https://github.com/heroku/heroku-buildpack-nodejs.git"
+        }
+     ],
+  "stack": "heroku-24"
+}

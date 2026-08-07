@@ -1,0 +1,31 @@
+{
+  "bot-name": "MULAA-MD",
+  "description": "Whatsapp bot by mulax",
+  "logo": "https://files.catbox.moe/kgsd4q.jpeg",
+  "keywords": ["bot"],
+  "documentation-link": "https://maria-session-bhmh.onrender.com",
+  "owner-verification": "amantlempaekae@gmail.com",
+  
+  "env": {
+    "SESSION_ID": {
+      "description": "Put your SESSION_ID here. Make sure it starts with Mulaa,-X~",
+      "value": "",
+      "required": true
+    },
+      "OWNER_NUMBER": {
+        "description": "OWNER_NUMBER with country code (e.g, 23470324xxxxx)",
+        "value":"234703241xxxx",
+        "required": true
+   },
+    "PREFIX": {
+      "description": "Bot command prefix, (e.g, . , ! @ etc)",
+      "value": ".",
+      "required": true
+    },
+    "MODE": {
+      "description": "Bot mode can be public, private, inbox, or groups (in lowercase) (e.g., public)",
+      "value": "private",
+      "required": true
+    }
+  }
+}
