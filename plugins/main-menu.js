@@ -10,11 +10,20 @@ const mediaPath = {
     audio: path.join(__dirname, '../lib/media/menu-audio.mp3')
 };
 
-// Function to get random photo
+// Function to get a random photo safely (supports jpg, jpeg, png, webp)
 function getRandomPhoto() {
     const photosDir = path.join(__dirname, '../lib/photos');
-    const photoFiles = fs.readdirSync(photosDir).filter(f => f.match(/^[1-4]\.jpeg$/));
-    return path.join(photosDir, photoFiles[Math.floor(Math.random() * photoFiles.length)]);
+    if (!fs.existsSync(photosDir)) return null;
+    
+    const validExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    const photoFiles = fs.readdirSync(photosDir).filter(file => 
+        validExtensions.includes(path.extname(file).toLowerCase())
+    );
+    
+    if (photoFiles.length === 0) return null;
+    
+    const randomFile = photoFiles[Math.floor(Math.random() * photoFiles.length)];
+    return path.join(photosDir, randomFile);
 }
 
 cmd({
@@ -55,13 +64,17 @@ async (conn, mek, m, { from, sender, pushname, reply }) => {
             }
         });
         
-        
- //fake status and quoted.       
-const voltage = { key: {participant: `0@s.whatsapp.net`, ...(m.chat ? { remoteJid: `status@broadcast` } : {}) }, message: {
-newsletterAdminInviteMessage: {
-newsletterJid: '120363292215098632@newsletter',
-    newsletterName: '⏤͟͟͞͞☆ᴠᴏʟᴛ⃝🜲ᴀɢᴇ☆ ͟͞͞⏤',
-    caption: 'ᴠᴏʟᴛᴀɢᴇ ʟᴏʀᴅ ᴅᴇᴠ\nsᴘᴀʀᴋ ᴍᴅ'}}}
+        // fake status and quoted.       
+        const voltage = { 
+            key: { participant: `0@s.whatsapp.net`, ...(m.chat ? { remoteJid: `status@broadcast` } : {}) }, 
+            message: {
+                newsletterAdminInviteMessage: {
+                    newsletterJid: '120363292215098632@newsletter',
+                    newsletterName: tiny('mulaxprime'),
+                    caption: tiny('tsala Go')
+                }
+            }
+        };
     
         // Date and time configuration
         const dateOptions = {
@@ -83,7 +96,7 @@ newsletterJid: '120363292215098632@newsletter',
         const time = new Date().toLocaleTimeString('en-US', timeOptions);
 
         // Uptime calculation
-        const uptime = process.uptime();  // Get uptime in seconds
+        const uptime = process.uptime();  
         const days = Math.floor(uptime / (3600 * 24));
         const hours = Math.floor((uptime % (3600 * 24)) / 3600);
         const minutes = Math.floor((uptime % 3600) / 60);
@@ -95,7 +108,7 @@ newsletterJid: '120363292215098632@newsletter',
 │ 📅 *Dᴀᴛᴇ:* ${date}
 │ 🕐 *Tɪᴍᴇ:* ${time}
 │ ⏱️ *Uᴘᴛɪᴍᴇ:* ${days}d ${hours}h ${minutes}m ${seconds}s
-│ 👑 *Oᴡɴᴇʀ:* MULAX PRIME 
+│ 👑 *Oᴡ𝒏ᴇʀ:* MULAX PRIME 
 │ 🔧 *Pʀᴇғɪx:* .\n
 ╰──────────────\n`;
 
@@ -111,7 +124,8 @@ ${menu[category]}╰───────────❍`;
         let kenu = tiny(madeMenu);
         
         const photoPath = getRandomPhoto();
-        if (fs.existsSync(photoPath)) {
+        
+        if (photoPath && fs.existsSync(photoPath)) {
             const imageBuffer = fs.readFileSync(photoPath);
             await conn.sendMessage(
                 from,
@@ -119,32 +133,33 @@ ${menu[category]}╰───────────❍`;
                     image: imageBuffer,
                     caption: kenu,
                     contextInfo: {
-                            mentionedJid: [sender],
-                            forwardingScore: 9999,
-                            isForwarded: true,
-                            forwardedNewsletterMessageInfo: {
-                                newsletterJid: '120363420003990090@newsletter',
-                                newsletterName: '⏤͟͟͟͟͞͞͞͞Tsala Yame⏤'
-                            }
+                        mentionedJid: [sender],
+                        forwardingScore: 9999,
+                        isForwarded: true,
+                        forwardedNewsletterMessageInfo: {
+                            newsletterJid: '120363420003990090@newsletter',
+                            newsletterName: '⏤͟͟͟͟͞͞͞͞Tsala Yame⏤'
+                        }
                     }
                 },
                 { quoted: voltage }
             );
         } else {
+            // Fallback text message if no photos are found in the folder
             await conn.sendMessage(
                 from,
                 {
                     text: kenu,
                     contextInfo: {
-                            mentionedJid: [sender],
-                            forwardingScore: 9999,
-                            isForwarded: true,
-                            forwardedNewsletterMessageInfo: {
-                                newsletterJid: '120363420003990090@newsletter',
-                                newsletterName: '⏤͟͟͟͟͞͞͞͞Tsala Yame⏤'
-                            },
+                        mentionedJid: [sender],
+                        forwardingScore: 9999,
+                        isForwarded: true,
+                        forwardedNewsletterMessageInfo: {
+                            newsletterJid: '120363420003990090@newsletter',
+                            newsletterName: '⏤͟͟͟͟͞͞͞͞Tsala Yame⏤'
+                        },
                         externalAdReply: {
-                           showAdAttribution: false,
+                            showAdAttribution: false,
                             containsAutoReply: true,
                             title: "✧ Tsala Yame - COMMANDS PANEL✧",
                             body: "Powered by Mulax Prime",

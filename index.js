@@ -19,10 +19,10 @@ const util = require('util')
 const { sms, downloadMediaMessage } = require('./lib/msg')
 const axios = require('axios')
 const { File } = require('megajs')
-const prefix = '.'
+const prefix = config.PREFIX || '.'
 
-const ownerNumber = ['26775462914']
-let dynamicMode = config.MODE
+const ownerNumber = [config.OWNER_NUMBER || '26775462914']
+let dynamicMode = config.MODE || 'public'
 
 //===================SESSION-AUTH============================
 const authFolder = path.join(__dirname, 'auth_info_baileys')
@@ -34,19 +34,16 @@ async function ensureSession() {
 
   const credsPath = path.join(authFolder, 'creds.json')
 
-  // Already have local session
   if (fs.existsSync(credsPath)) {
     console.log("Local session found ✅")
     return
   }
 
-  // No local session and no SESSION_ID → just continue (QR will be generated)
   if (!config.SESSION_ID) {
     console.log("No SESSION_ID found. Will generate QR code...")
     return
   }
 
-  // Download from Mega
   console.log('Downloading session from Mega...')
   const sessdata = config.SESSION_ID.replace("Tsala-X~", '')
 
@@ -77,97 +74,122 @@ const express = require("express")
 const app = express()
 const port = process.env.PORT || 8000
 
-// Store latest QR + status for the web page
 let latestQR = null
 let connectionStatus = "Starting..."
 
 app.get("/", (req, res) => {
-  if (latestQR) {
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Tsala Yame QR</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body {
-            margin: 0;
-            padding: 20px;
-            background: #0f0f0f;
-            color: white;
-            font-family: system-ui, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            text-align: center;
-          }
-          h1 { margin-bottom: 10px; }
-          .status { 
-            margin: 15px 0; 
-            padding: 10px 20px; 
-            background: #1a1a1a; 
-            border-radius: 8px;
-            font-size: 18px;
-          }
-          img {
-            max-width: 340px;
-            width: 100%;
-            border: 8px solid white;
-            border-radius: 12px;
-            background: white;
-          }
-          .note { margin-top: 20px; color: #aaa; font-size: 14px; }
-        </style>
-      </head>
-      <body>
-        <h1>Tsala Yame Pairing</h1>
-        <div class="status">${connectionStatus}</div>
-        <img src="${latestQR}" alt="QR Code">
-        <div class="note">Scan this QR with WhatsApp → Linked Devices</div>
-        <script>
-          setTimeout(() => location.reload(), 8000);
-        </script>
-      </body>
-      </html>
-    `)
-  } else {
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Tsala Yame</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body {
-            background: #0f0f0f;
-            color: white;
-            font-family: system-ui;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            text-align: center;
-          }
-        </style>
-      </head>
-      <body>
-        <div>
-          <h1>Tsala Yame</h1>
-          <p>${connectionStatus}</p>
-          <p>Waiting for QR...</p>
+  const isConnected = connectionStatus.includes("Connected");
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Tsala Yame - Control Center</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+        body {
+          background: #09090b;
+          background-image: radial-gradient(circle at 50% 0%, #1a1528 0%, #09090b 70%);
+          color: #f8fafc;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 100vh;
+          padding: 20px;
+        }
+        .card {
+          background: rgba(18, 18, 24, 0.7);
+          backdrop-filter: blur(16px);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 24px;
+          padding: 36px 28px;
+          max-width: 400px;
+          width: 100%;
+          text-align: center;
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+        }
+        .badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(168, 85, 247, 0.1);
+          color: #c084fc;
+          padding: 6px 14px;
+          border-radius: 50px;
+          font-size: 13px;
+          font-weight: 600;
+          margin-bottom: 20px;
+          border: 1px solid rgba(168, 85, 247, 0.2);
+        }
+        .pulse {
+          width: 8px;
+          height: 8px;
+          background: ${isConnected ? '#22c55e' : '#eab308'};
+          border-radius: 50%;
+          box-shadow: 0 0 10px ${isConnected ? '#22c55e' : '#eab308'};
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0% { transform: scale(0.95); opacity: 0.8; }
+          50% { transform: scale(1.2); opacity: 1; }
+          100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.5px; }
+        .subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+        .status-box {
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          padding: 12px 16px;
+          border-radius: 12px;
+          font-size: 14px;
+          font-weight: 500;
+          margin-bottom: 24px;
+          color: #e2e8f0;
+        }
+        .qr-container {
+          background: #ffffff;
+          padding: 16px;
+          border-radius: 16px;
+          display: inline-block;
+          margin-bottom: 20px;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+        img { width: 100%; max-width: 260px; display: block; border-radius: 8px; }
+        .footer-note { color: #64748b; font-size: 13px; line-height: 1.5; }
+      </style>
+      ${!isConnected && latestQR ? '<script>setTimeout(() => location.reload(), 8000);</script>' : ''}
+    </head>
+    <body>
+      <div class="card">
+        <div class="badge">
+          <div class="pulse"></div>
+          Tsala Yame Core
         </div>
-      </body>
-      </html>
-    `)
-  }
+        <h1>Connection Center</h1>
+        <p class="subtitle">Powered By Mulax Prime</p>
+        
+        <div class="status-box">${connectionStatus}</div>
+
+        ${latestQR && !isConnected ? `
+          <div class="qr-container">
+            <img src="${latestQR}" alt="WhatsApp Pairing QR">
+          </div>
+          <div class="footer-note">Scan this QR code using WhatsApp on your phone:<br><strong>Settings &gt; Linked Devices &gt; Link a Device</strong></div>
+        ` : `
+          <div class="footer-note">${isConnected ? 'Bot is online, running smoothly and ready for action! ✨' : 'Waiting for system initialization and QR generation...'}</div>
+        `}
+      </div>
+    </body>
+    </html>
+  `)
 })
 
 app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`)
-  console.log(`Open that link to scan the QR`)
+  console.log(`Open that link to view the stunning control dashboard`)
 })
 
 async function connectToWA() {
@@ -235,20 +257,39 @@ async function connectToWA() {
 
         console.log('😼 Installing plugins...')
         
-        fs.readdirSync("./plugins/").forEach((plugin) => {
-          if (path.extname(plugin).toLowerCase() === ".js") {
-            require("./plugins/" + plugin)
-          }
-        })
+        let loadedPluginsCount = 0;
+        if (fs.existsSync("./plugins/")) {
+          fs.readdirSync("./plugins/").forEach((plugin) => {
+            if (path.extname(plugin).toLowerCase() === ".js") {
+              try {
+                require("./plugins/" + plugin);
+                loadedPluginsCount++;
+              } catch (pluginErr) {
+                console.error(`Failed to load plugin ${plugin}:`, pluginErr);
+              }
+            }
+          })
+        }
 
-        const pluginCount = 100
-        console.log(`✅ Plugins Loaded: ${pluginCount}`)
+        console.log(`✅ Plugins Loaded: ${loadedPluginsCount}`)
         console.log('🜢 Tsala Yame connected!');
 
-        let up = `aria-md ᴄᴏɴɴᴇᴄᴛᴇᴅ✅\n\nᴏᴡɴᴇʀ: ${config.OWNER_NAME}\n\nᴜsᴇʀ: ${conn.user?.id || "Unknown"}\n\nᴄᴏᴍᴍᴀɴᴅs: ${pluginCount}\n\nᴘʀᴇғɪx: ${prefix}\n\nCurrent mode: ${dynamicMode}`
+        // Random image pool (defaults to config.ALIVE_IMG if provided, mixed with aesthetic/tech wallpapers)
+        const randomImagePool = [
+          config.ALIVE_IMG,
+          'https://files.catbox.moe/lztgy3.png',
+          'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop',
+          'https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=800&auto=format&fit=crop',
+          'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?q=80&w=800&auto=format&fit=crop',
+          'https://picsum.photos/800/800'
+        ].filter(Boolean); // removes undefined/null entries
+
+        const selectedAliveImg = randomImagePool[Math.floor(Math.random() * randomImagePool.length)];
+
+        let up = `🌸 *ᴛsᴀʟᴀ ʏᴀᴍᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ* 🌸\n\n> *ʙᴏᴛ ɴᴀᴍᴇ:* ${config.BOT_NAME || "Tsala_Yame"}\n> *ᴏᴡɴᴇʀ:* ${config.OWNER_NAME || "MULAX PRIME"}\n> *ᴜsᴇʀ ᴊɪᴅ:* ${conn.user?.id || "Unknown"}\n> *ᴘʟᴜɢɪɴs:* ${loadedPluginsCount}\n> *ᴘʀᴇғɪx:* ${prefix}\n> *ᴍᴏᴅᴇ:* ${dynamicMode}\n\n*Pᴏᴡᴇʀᴇᴅ ʙʏ Mᴜʟᴀx Pʀɪᴍᴇ*`
 
         conn.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-          image: { url: `https://telegra.ph/file/900435c6d3157c98c3c88.jpg` },
+          image: { url: selectedAliveImg },
           caption: up
         }).catch(err => console.log("Failed to send startup message:", err))
       }
@@ -329,14 +370,12 @@ async function connectToWA() {
         }
       }
 
-      // Private mode restriction
       if (isCmd && dynamicMode === 'private' && ![botNumber, ...ownerNumber].includes(senderNumber)) {
         return conn.sendMessage(from, {
           text: 'Sorry, this bot is running in private mode and you are not authorized to use commands.'
         }, { quoted: mek })
       }
 
-      // .mode command
       if (isCmd && command === 'mode') {
         if (![botNumber, ...ownerNumber].includes(senderNumber)) {
           return reply('Sorry, only the owner can change the mode.')
@@ -353,7 +392,7 @@ async function connectToWA() {
       }
 
       const events = require('./command')
-      const cmdName = isCmd ? body.slice(1).trim().split(" ")[0].toLowerCase() : false
+      const cmdName = isCmd ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase() : false
 
       if (isCmd) {
         const cmd = events.commands.find((cmd) => cmd.pattern === (cmdName)) ||
@@ -420,7 +459,6 @@ async function connectToWA() {
   }
 }
 
-// Start
 setTimeout(() => {
   connectToWA()
 }, 2000)

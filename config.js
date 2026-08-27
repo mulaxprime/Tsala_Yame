@@ -15,4 +15,5 @@ module.exports = {
     BOT_NAME: process.env.BOT_NAME || "Tsala_Yame",
     AUTO_READ_STATUS: process.env.AUTO_READ_STATUS || "False",
     OWNER_NAME: process.env.OWNER_NAME || "MULAX PRIME",
+    AUTO_CHATBOT: process.env.AUTO_CHATBOT || "True", // Add this line
 };

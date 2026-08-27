@@ -13,6 +13,22 @@ try {
   config = {};
 }
 
+// Function to get a random photo safely (supports jpg, jpeg, png, webp)
+function getRandomPhoto() {
+    const photosDir = path.join(__dirname, '../lib/photos');
+    if (!fs.existsSync(photosDir)) return null;
+    
+    const validExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    const photoFiles = fs.readdirSync(photosDir).filter(file => 
+        validExtensions.includes(path.extname(file).toLowerCase())
+    );
+    
+    if (photoFiles.length === 0) return null;
+    
+    const randomFile = photoFiles[Math.floor(Math.random() * photoFiles.length)];
+    return path.join(photosDir, randomFile);
+}
+
 cmd(
   {
     pattern: "mode",
@@ -21,7 +37,7 @@ cmd(
     react: "🛡️",
     filename: __filename
   },
-  async (conn, mek, m, { args, isOwner, reply }) => {
+  async (conn, mek, m, { args, isOwner, reply, from }) => {
     try {
       // Only allow the owner to change the mode.
       if (!isOwner) {
@@ -40,7 +56,18 @@ cmd(
       // Write the updated config back to the config.json file.
       await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
       
-      reply(`Bot mode updated to: ${newMode}`);
+      const successMessage = `Bot mode updated to: ${newMode}`;
+      const photoPath = getRandomPhoto();
+
+      if (photoPath && fs.existsSync(photoPath)) {
+          const imageBuffer = fs.readFileSync(photoPath);
+          await conn.sendMessage(from, {
+              image: imageBuffer,
+              caption: successMessage
+          }, { quoted: mek });
+      } else {
+          await reply(successMessage);
+      }
     } catch (e) {
       console.error(e);
       reply(`${e}`);
