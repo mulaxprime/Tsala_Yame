@@ -35,36 +35,49 @@ cmd({
     try {
         await conn.sendMessage(from, { react: { text: '🎶', key: mek.key } });
 
-        // 1. Search YouTube
+        // 1. Search YouTube (optional metadata fallback, or directly use David Cyril's play endpoint search query)
         const search = await yts(q);
-        if (!search || !search.videos || search.videos.length === 0) {
-            return reply(tiny("❌ No results found."));
+        const video = search && search.videos && search.videos.length > 0 ? search.videos[0] : null;
+        
+        let title = video ? video.title : q;
+        let duration = video ? video.timestamp : 'N/A';
+        let views = video && video.views ? video.views.toLocaleString() : 'N/A';
+        let url = video ? video.url : '';
+        let thumbnail = video ? video.thumbnail : '';
+
+        // 2. Use David Cyril Play Endpoint API (https://apis.davidcyril.name.ng/play?query=...)
+        let audioUrl = null;
+
+        try {
+            const res = await axios.get(`https://apis.davidcyril.name.ng/play?query=${encodeURIComponent(q)}`);
+            const data = res.data;
+            
+            if (data && data.status && data.result) {
+                title = data.result.title || title;
+                duration = data.result.duration || duration;
+                views = data.result.views ? Number(data.result.views).toLocaleString() : views;
+                url = data.result.video_url || url;
+                thumbnail = data.result.thumbnail || thumbnail;
+                audioUrl = data.result.download_url;
+            }
+        } catch (e) {
+            console.error("David Cyril API failed:", e.message);
         }
 
-        const video = search.videos[0];
-        const url = video.url;
-        const title = video.title;
-        const duration = video.timestamp;
-        const views = video.views ? video.views.toLocaleString() : 'N/A';
-        const author = video.author?.name || 'N/A';
-        const ago = video.ago || 'N/A';
-        const thumbnail = video.thumbnail;
+        if (!audioUrl || typeof audioUrl !== 'string') {
+            return reply(tiny("❌ Failed to get audio download link from David Cyril API. Try again later."));
+        }
 
         const infoText = 
             `│ 🎵 *Title:* ${title}
 │ ⏱️ *Duration:* ${duration}
 │ 👀 *Views:* ${views}
-│ 👤 *Author:* ${author}
-│ 📅 *Uploaded:* ${ago}
 │ 🔗 *URL:* ${url}
 │ 
 │ ⏳ *Downloading audio...*`;
 
         const cardContent = 
-            `╭───〔 🌸 *Tsala YouTube Downloader* 🌸 〕───⬣
-${infoText}
-╰──────────────────────⬣
-> *✨ Tsala Yame | Pᴏᴡᴇʀᴇᴅ ʙʏ Mᴜʟᴀx Pʀɪᴍᴇ*`;
+            `╭───〔 🌸 *Tsala YouTube Downloader* 🌸 〕───⬣\n${infoText}\n╰──────────────────────⬣\n> *✨ Tsala Yame | Pᴏᴡᴇʀᴇᴅ ʙʏ Mᴜʟᴀx Pʀɪᴍᴇ*`;
 
         const styledText = tiny(cardContent);
         const photoPath = getRandomPhoto();
@@ -96,59 +109,20 @@ ${infoText}
                 caption: styledText,
                 contextInfo
             }, { quoted: mek });
-        } else {
+        } else if (thumbnail) {
             await conn.sendMessage(from, {
                 image: { url: thumbnail },
                 caption: styledText,
                 contextInfo
             }, { quoted: mek });
+        } else {
+            await conn.sendMessage(from, { text: styledText, contextInfo }, { quoted: mek });
         }
 
-        // 2. Try multiple reliable APIs
-        let audioUrl = null;
-
-        // API 1: BK9 (Highly Reliable)
-        try {
-            const res1 = await axios.get(`https://bk9.fun/download/ytmp3?url=${encodeURIComponent(url)}`);
-            if (res1.data?.BK9?.mp3) {
-                audioUrl = res1.data.BK9.mp3;
-            }
-        } catch (e) {
-            console.log("API 1 (BK9) failed");
-        }
-
-        // API 2: Vreden (Good fallback)
-        if (!audioUrl) {
-            try {
-                const res2 = await axios.get(`https://api.vreden.my.id/api/ytmp3?url=${encodeURIComponent(url)}`);
-                if (res2.data?.result?.download?.url) {
-                    audioUrl = res2.data.result.download.url;
-                }
-            } catch (e) {
-                console.log("API 2 (Vreden) failed");
-            }
-        }
-
-        // API 3: Siputzx (Backup)
-        if (!audioUrl) {
-            try {
-                const res3 = await axios.get(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(url)}`);
-                if (res3.data?.data?.dl) {
-                    audioUrl = res3.data.data.dl;
-                }
-            } catch (e) {
-                console.log("API 3 (Siputzx) failed");
-            }
-        }
-
-        if (!audioUrl) {
-            return reply(tiny("❌ Failed to get audio download link. All free APIs are currently down.\nTry again later."));
-        }
-
-        // 3. Download and send
+        // 3. Download and send audio
         const audioBuffer = await axios.get(audioUrl, {
             responseType: 'arraybuffer',
-            timeout: 60000 // 60 seconds timeout for large files
+            timeout: 60000
         });
 
         await conn.sendMessage(from, {

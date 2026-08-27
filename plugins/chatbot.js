@@ -42,7 +42,7 @@ cmd({
     }
 });
 
-// Event Listener for Incoming Messages (Auto-Reply Engine)
+// Event Listener for Incoming Messages (Auto-Reply Engine using David Cyril Gemini AI Endpoint)
 cmd({
     on: "text"
 }, async (conn, mek, m, { from, body, sender, isGroup, isMe }) => {
@@ -54,11 +54,12 @@ cmd({
         // Optional: Restrict auto-reply strictly to private chats (DMs) so it doesn't spam groups
         if (isGroup) return; 
 
-        // Generate response using a free public AI or fallback canned response
+        // Generate response using David Cyril Gemini AI endpoint based on the correct /ai/gemini-3.1-flash-lite route
         let replyText = "";
         try {
-            const apiRes = await axios.get(`https://api.popcat.xyz/chatbot?msg=${encodeURIComponent(body)}&owner=Mulax&botname=Tsala`);
-            replyText = apiRes.data.response || "Hey! Mulax Prime is currently offline right now, but I have received your message and will pass it along as soon as they are back!";
+            const apiRes = await axios.get(`https://apis.davidcyril.name.ng/ai/gemini-3.1-flash-lite?prompt=${encodeURIComponent(body)}`);
+            const data = apiRes.data;
+            replyText = data.result || data.data || data.response || data.answer || "Hey! Mulax Prime is currently offline right now, but I have received your message and will pass it along as soon as they are back!";
         } catch {
             replyText = "Hello! Mulax Prime is currently offline. Your message has been saved, and they will get back to you shortly.";
         }

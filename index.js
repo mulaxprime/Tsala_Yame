@@ -274,7 +274,6 @@ async function connectToWA() {
         console.log(`✅ Plugins Loaded: ${loadedPluginsCount}`)
         console.log('🜢 Tsala Yame connected!');
 
-        // Random image pool (defaults to config.ALIVE_IMG if provided, mixed with aesthetic/tech wallpapers)
         const randomImagePool = [
           config.ALIVE_IMG,
           'https://files.catbox.moe/lztgy3.png',
@@ -282,7 +281,7 @@ async function connectToWA() {
           'https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=800&auto=format&fit=crop',
           'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?q=80&w=800&auto=format&fit=crop',
           'https://picsum.photos/800/800'
-        ].filter(Boolean); // removes undefined/null entries
+        ].filter(Boolean);
 
         const selectedAliveImg = randomImagePool[Math.floor(Math.random() * randomImagePool.length)];
 
@@ -420,7 +419,7 @@ async function connectToWA() {
             isMe, isOwner, groupMetadata, groupName, participants,
             groupAdmins, isBotAdmins, isAdmins, reply
           })
-        } else if (mek.q && command.on === "text") {
+        } else if (body && command.on === "text") {
           command.function(conn, mek, m, {
             from, quoted, body, isCmd, command, args, q, isGroup,
             sender, senderNumber, botNumber2, botNumber, pushname,
