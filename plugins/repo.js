@@ -58,7 +58,7 @@ ${repoInfo}
         forwardingScore: 9999,
         isForwarded: true,
         forwardedNewsletterMessageInfo: {
-            newsletterJid: '120363420003990090@newsletter',
+            newsletterJid: '120363412950068938@newsletter',
             newsletterName: '⏤͟͟͞͞Tsala Yame  ͟͞͞⏤'
         },
         externalAdReply: {

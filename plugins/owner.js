@@ -33,14 +33,24 @@ ${contentText}
     const styledText = tiny(cardContent);
     const photoPath = getRandomPhoto();
 
+    const contextInfo = {
+        forwardingScore: 9999,
+        isForwarded: true,
+        forwardedNewsletterMessageInfo: {
+            newsletterJid: '120363420003990090@newsletter',
+            newsletterName: '⏤͟͟͞͞Tsala Yame  ͟͞͞⏤'
+        }
+    };
+
     if (photoPath && fs.existsSync(photoPath)) {
         const imageBuffer = fs.readFileSync(photoPath);
         await conn.sendMessage(from, {
             image: imageBuffer,
-            caption: styledText
+            caption: styledText,
+            contextInfo
         }, { quoted: mek });
     } else {
-        await conn.sendMessage(from, { text: styledText }, { quoted: mek });
+        await conn.sendMessage(from, { text: styledText, contextInfo }, { quoted: mek });
     }
 }
 
@@ -151,11 +161,17 @@ cmd({ pattern: "clearchats", desc: "Clear all chats from the bot.", category: "o
   }
 });
 
-// 7. Get User JID
-cmd({ pattern: "jid", desc: "Get the user's JID.", category: "owner", react: "✨", filename: __filename }, async (conn, mek, m, { from, isOwner, reply }) => {
+// 7. Get User/Chat JID
+cmd({ pattern: "jid", desc: "Get the chat or user JID.", category: "owner", react: "✨", filename: __filename }, async (conn, mek, m, { from, isOwner, reply }) => {
   if (!isOwner) return reply(tiny("❌ You are not my owner!"));
   await conn.sendMessage(from, { react: { text: '✨', key: mek.key } });
-  await sendCardMessage(conn, from, mek, "User JID", `│ 📌 *JID:* ${from}`);
+  
+  let jidInfo = `│ 📌 *Chat JID:* ${from}`;
+  if (m.quoted && m.quoted.sender) {
+      jidInfo += `\n│ 👤 *Quoted JID:* ${m.quoted.sender}`;
+  }
+  
+  await sendCardMessage(conn, from, mek, "JID Info", jidInfo);
 });
 
 // 8. Group JIDs List
@@ -171,4 +187,49 @@ cmd({ pattern: "gjid", desc: "Get the list of JIDs for all groups the bot is par
   } catch (error) {
     reply(tiny(`❌ Error: ${error.message}`));
   }
+});
+
+// 9. Convert WhatsApp Channel Link to JID
+cmd({
+    pattern: "cjid",
+    desc: "Convert a WhatsApp channel link to its JID.",
+    category: "tools",
+    react: "🔗",
+    filename: __filename
+}, async (conn, mek, m, { from, args, reply }) => {
+    if (!args[0]) return reply(tiny("❌ Please provide a WhatsApp channel link.\nExample: .cjid https://whatsapp.com/channel/..."));
+    
+    const link = args[0];
+    
+    if (!link.includes('whatsapp.com/channel/')) {
+        return reply(tiny("❌ Invalid channel link provided!"));
+    }
+
+    try {
+        await conn.sendMessage(from, { react: { text: '🔗', key: mek.key } });
+
+        const inviteCode = link.split('channel/')[1]?.trim();
+        if (!inviteCode) return reply(tiny("❌ Could not extract invite code from the link."));
+
+        const newsletterMeta = await conn.newsletterMetadata("invite", inviteCode);
+        
+        if (!newsletterMeta || !newsletterMeta.id) {
+            return reply(tiny("❌ Failed to fetch channel details. Make sure the link is correct."));
+        }
+
+        const channelJid = newsletterMeta.id;
+        const channelName = newsletterMeta.name || "Unknown Channel";
+        const subscribers = newsletterMeta.subscribers ? Number(newsletterMeta.subscribers).toLocaleString() : "N/A";
+
+        const resultText = 
+`│ 📢 *Channel Name:* ${channelName}
+│ 👥 *Subscribers:* ${subscribers}
+│ 📌 *Channel JID:* \`${channelJid}\``;
+
+        await sendCardMessage(conn, from, mek, "Channel JID", resultText);
+
+    } catch (error) {
+        console.error("CJID Error:", error);
+        reply(tiny(`❌ Error converting link: ${error.message}`));
+    }
 });

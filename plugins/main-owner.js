@@ -40,7 +40,7 @@ TEL;type=CELL;type=VOICE;waid=${config.OWNER_NUMBER}:+${config.OWNER_NUMBER}
 X-ABLabel:📞 Call Owner
 EMAIL: amantlempaekae@gmail.com
 X-ABLabel:📧 Email
-URL: https://mulax-prime.vercel.app
+URL: https://mulaxprime.vercel.app
 X-ABLabel:🌐 Website
 NOTE:Contact for bot related queries
 END:VCARD
@@ -61,7 +61,7 @@ END:VCARD
 │ 👨‍💻 *Dᴇᴠ:* MULAX PRIME
 │ 📱 *Pʜᴏɴᴇ:* +${config.OWNER_NUMBER}
 │ 📧 *Eᴍᴀɪʟ:* amantlempaekae@gmail.com
-│ 🌐 *Wᴇʙ:* https://mulax-prime.vercel.app
+│ 🌐 *Wᴇʙ:* https://mulaxprime.vercel.app
 ╰──────────────⬣
 > *✨ Tsala Yame | Pᴏᴡᴇʀᴇᴅ ʙʏ Mᴜʟᴀx Pʀɪᴍᴇ*`;
 
