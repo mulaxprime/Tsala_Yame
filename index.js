@@ -176,7 +176,11 @@ app.get("/", (req, res) => {
         
         <div class="status-box">${connectionStatus}</div>
 
-        <div class="footer-note">${isConnected ? 'Bot is online, running smoothly and ready for action! ✨' : 'Check console for pairing code instructions'}</div>
+        <div class="footer-note">
+          ${isConnected 
+            ? 'Bot is online, running smoothly and ready for action! ✨' 
+            : 'Check console logs for pairing code. Watch the Logs section in your hosting panel for the code to appear.'}
+        </div>
       </div>
     </body>
     </html>
@@ -218,36 +222,56 @@ async function connectToWA() {
           const waitTime = Math.ceil((60000 - (now - lastPairingCodeTime)) / 1000)
           console.log(`⏳ Please wait ${waitTime} seconds before requesting another pairing code...`)
         } else {
-          readlineActive = true
-          const readline = require('readline')
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-          })
+          // Check if we're in an interactive terminal environment
+          const isInteractive = process.stdin.isTTY
           
-          rl.question('\n📱 Enter your WhatsApp phone number (with country code e.g., 26775462914): ', async (phone) => {
-            rl.close()
-            readlineActive = false
+          if (isInteractive) {
+            // Local/Interactive environment - ask for phone number
+            readlineActive = true
+            const readline = require('readline')
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stdout
+            })
+            
+            rl.question('\n📱 Enter your WhatsApp phone number (with country code e.g., 26775462914): ', async (phone) => {
+              rl.close()
+              readlineActive = false
+              pairingCodeGenerated = true
+              lastPairingCodeTime = Date.now()
+              
+              try {
+                const code = await conn.requestPairingCode(phone)
+                console.log('\n════════════════════════════════════════')
+                console.log('✅ YOUR PAIRING CODE (Valid for 1 minute):')
+                console.log(`📌 CODE: ${code}`)
+                console.log('════════════════════════════════════════')
+                console.log('📲 On your phone:')
+                console.log('   WhatsApp > Settings > Linked Devices > Link a Device')
+                console.log('   Enter the code above when prompted')
+                console.log('════════════════════════════════════════\n')
+                connectionStatus = `Pairing Code: ${code}`
+              } catch (err) {
+                console.error('❌ Error requesting pairing code:', err.message)
+                pairingCodeGenerated = false
+                connectionStatus = "Error requesting pairing code"
+              }
+            })
+          } else {
+            // Non-interactive environment (Hosting Platform)
+            console.log('\n════════════════════════════════════════')
+            console.log('🌐 DEPLOYED ON HOSTING PLATFORM DETECTED')
+            console.log('════════════════════════════════════════')
+            console.log('📱 Your pairing code will appear here when ready.')
+            console.log('📲 On your phone:')
+            console.log('   WhatsApp > Settings > Linked Devices > Link a Device')
+            console.log('   Keep this console open and watch for the code.')
+            console.log('════════════════════════════════════════\n')
+            
             pairingCodeGenerated = true
             lastPairingCodeTime = Date.now()
-            
-            try {
-              const code = await conn.requestPairingCode(phone)
-              console.log('\n════════════════════════════════════════')
-              console.log('✅ YOUR PAIRING CODE (Valid for 1 minute):')
-              console.log(`📌 CODE: ${code}`)
-              console.log('════════════════════════════════════════')
-              console.log('📲 On your phone:')
-              console.log('   WhatsApp > Settings > Linked Devices > Link a Device')
-              console.log('   Enter the code above when prompted')
-              console.log('════════════════════════════════════════\n')
-              connectionStatus = `Pairing Code: ${code}`
-            } catch (err) {
-              console.error('❌ Error requesting pairing code:', err.message)
-              pairingCodeGenerated = false
-              connectionStatus = "Error requesting pairing code"
-            }
-          })
+            connectionStatus = "Waiting for pairing request..."
+          }
         }
       }
 

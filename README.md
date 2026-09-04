@@ -51,8 +51,84 @@ Set up your configuration variables in your hosting provider panel:
 * `MODE` — Bot operation mode (`public` or `private`).
 
 ### 3. Deploy & Connect
-Deploy the repository on any Node.js compatible platform (Railway, Render, Koyeb, or a local VPS). 
-Open your deployment URL or terminal port to scan the live generated QR code, and your bot will instantly connect with an automated startup status notification!
+
+#### Local Deployment
+Deploy on a local VPS or server:
+1. SSH into your server
+2. Clone the repository
+3. Run `npm install && npm start`
+4. Watch console for pairing code prompt
+5. Enter your phone number when asked
+6. Scan the code with WhatsApp
+
+#### Hosting Platforms (KataBump, Railway, Render, Koyeb)
+Deploy on any Node.js hosting platform:
+1. Connect your GitHub repository
+2. Set environment variables if needed
+3. Deploy/start the application
+4. **Watch the Live Logs for the pairing code**
+5. Scan the code using WhatsApp > Settings > Linked Devices > Link a Device
+
+The code will display in your hosting platform's **Console/Logs** section automatically.
+
+---
+
+## 📱 Getting Your Pairing Code
+
+### On Local Machine (Terminal/VPS)
+```
+📱 Enter your WhatsApp phone number (with country code e.g., 26775462914): 26775462914
+════════════════════════════════════════
+✅ YOUR PAIRING CODE (Valid for 1 minute):
+📌 CODE: 123456
+════════════════════════════════════════
+```
+
+### On Hosting Platforms
+
+The bot detects hosting environments and displays:
+
+```
+════════════════════════════════════════
+🌐 DEPLOYED ON HOSTING PLATFORM DETECTED
+════════════════════════════════════════
+📱 Your pairing code will appear here when ready.
+📲 On your phone:
+   WhatsApp > Settings > Linked Devices > Link a Device
+   Keep this console open and watch for the code.
+════════════════════════════════════════
+
+🔐 YOUR PAIRING CODE (Valid for 1 minute):
+📌 CODE: 654321
+════════════════════════════════════════
+```
+
+**Where to Find It:**
+- **KataBump**: Console tab (Live Logs)
+- **Railway**: Deployments → Logs
+- **Render**: Logs tab
+- **Koyeb**: Logs section
+- **AWS/Azure/GCP**: CloudWatch/Logs viewer
+
+### Finding the Code in Logs
+
+1. Look for `"PAIRING CODE"` in the logs
+2. Find the 6-8 digit code next to `CODE:`
+3. Use it immediately (valid for 60 seconds)
+4. If it expires, a new one will be generated
+
+### Pairing Steps
+
+Once you have the code:
+1. Open WhatsApp on your phone
+2. Tap **Settings** (gear icon)
+3. Select **Linked Devices**
+4. Tap **Link a Device**
+5. Enter the 6-8 digit code
+6. Select your phone model/name
+7. Confirm on your phone
+
+Watch the console - it will show `✅ Connected` when successful!
 
 ---
 
