@@ -56,7 +56,131 @@ Open your deployment URL or terminal port to scan the live generated QR code, an
 
 ---
 
-## 🛠️ Built With
+## �️ Random Image Configuration
+
+The bot displays random images when it connects successfully. Customize this feature by editing the image pool.
+
+### How It Works
+
+When your bot connects to WhatsApp, it sends a startup message with a randomly selected image from the configured pool. This adds visual appeal to your bot notifications!
+
+### Customizing Your Images
+
+Edit `index.js` and locate the `randomImagePool` section (around line 310):
+
+```javascript
+const randomImagePool = [
+  config.ALIVE_IMG,
+  'https://files.catbox.moe/lztgy3.png',
+  'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop',
+  'https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=800&auto=format&fit=crop',
+  'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?q=80&w=800&auto=format&fit=crop',
+  'https://picsum.photos/800/800'
+].filter(Boolean);
+```
+
+### Adding Your Own Images
+
+#### Option 1: Using Config File (⭐ Recommended)
+Set `ALIVE_IMG` in your `config.js`:
+```javascript
+module.exports = {
+  BOT_NAME: "Tsala_Yame",
+  OWNER_NUMBER: "26775462914",
+  MODE: "public",
+  ALIVE_IMG: "https://your-custom-image.com/image.jpg",
+  // ... other config
+}
+```
+
+#### Option 2: Add Direct URLs to Pool
+Modify the `randomImagePool` array directly in `index.js`:
+```javascript
+const randomImagePool = [
+  config.ALIVE_IMG,
+  'https://your-first-image.com/image1.jpg',
+  'https://your-second-image.com/image2.jpg',
+  'https://your-third-image.com/image3.jpg',
+  'https://picsum.photos/800/800'
+].filter(Boolean);
+```
+
+### Recommended Image Hosts
+
+| Service | Link | Features |
+|---------|------|----------|
+| **Catbox** | https://catbox.moe/ | Free, no account needed, 200MB limit |
+| **Imgur** | https://imgur.com/ | Free with account, easy sharing |
+| **Imgbb** | https://imgbb.com/ | Free registration, 32MB per image |
+| **Unsplash** | https://unsplash.com/ | Free high-quality stock photos |
+| **Pexels** | https://www.pexels.com/ | Free stock photography |
+
+### Image Specifications
+
+| Aspect | Recommendation |
+|--------|-----------------|
+| **Dimensions** | 800x800px or 400x400px (Square) |
+| **Format** | JPG, PNG, or GIF |
+| **File Size** | < 500KB for best performance |
+| **URL Type** | HTTPS recommended for security |
+| **Accessibility** | Must be publicly accessible |
+
+### How to Get Image URLs
+
+#### From Catbox (Recommended for Quick Setup)
+1. Visit https://catbox.moe/
+2. Drag and drop your image
+3. Copy the generated link
+4. Add to `randomImagePool` or `ALIVE_IMG`
+
+#### From Unsplash
+1. Find a photo at https://unsplash.com/
+2. Click the photo
+3. Right-click and select "Copy image link"
+4. Use the link in your config
+
+### Example Setup
+
+**config.js:**
+```javascript
+module.exports = {
+  BOT_NAME: "Tsala_Yame",
+  OWNER_NAME: "MULAX PRIME",
+  OWNER_NUMBER: "26775462914",
+  PREFIX: ".",
+  MODE: "public",
+  AUTO_READ_STATUS: "true",
+  ALIVE_IMG: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800",
+  SESSION_ID: ""
+}
+```
+
+**index.js (randomImagePool):**
+```javascript
+const randomImagePool = [
+  config.ALIVE_IMG,
+  'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800',
+  'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
+  'https://picsum.photos/800/800'
+].filter(Boolean);
+```
+
+### Troubleshooting Images
+
+**Images not showing?**
+- ✅ Verify URLs are publicly accessible (test in browser)
+- ✅ Ensure HTTPS protocol (not HTTP)
+- ✅ Check file format is supported (JPG, PNG, GIF)
+- ✅ Confirm image size is under 10MB
+
+**Slow image loading?**
+- ✅ Use compressed/optimized images
+- ✅ Try CDN-hosted images
+- ✅ Use smaller dimensions (800x800px max)
+
+---
+
+## �🛠️ Built With
 
 * **[Node.js](https://nodejs.org/)** — JavaScript runtime environment
 * **[@whiskeysockets/baileys](https://github.com/WhiskeySockets/Baileys)** — WhatsApp Web API wrapper

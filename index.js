@@ -76,6 +76,9 @@ const port = process.env.PORT || 8000
 
 let latestQR = null
 let connectionStatus = "Starting..."
+let lastPairingCodeTime = 0
+let pairingCodeGenerated = false
+let readlineActive = false
 
 app.get("/", (req, res) => {
   const isConnected = connectionStatus.includes("Connected");
@@ -160,7 +163,7 @@ app.get("/", (req, res) => {
         img { width: 100%; max-width: 260px; display: block; border-radius: 8px; }
         .footer-note { color: #64748b; font-size: 13px; line-height: 1.5; }
       </style>
-      ${!isConnected && latestQR ? '<script>setTimeout(() => location.reload(), 8000);</script>' : ''}
+
     </head>
     <body>
       <div class="card">
@@ -173,14 +176,7 @@ app.get("/", (req, res) => {
         
         <div class="status-box">${connectionStatus}</div>
 
-        ${latestQR && !isConnected ? `
-          <div class="qr-container">
-            <img src="${latestQR}" alt="WhatsApp Pairing QR">
-          </div>
-          <div class="footer-note">Scan this QR code using WhatsApp on your phone:<br><strong>Settings &gt; Linked Devices &gt; Link a Device</strong></div>
-        ` : `
-          <div class="footer-note">${isConnected ? 'Bot is online, running smoothly and ready for action! ✨' : 'Waiting for system initialization and QR generation...'}</div>
-        `}
+        <div class="footer-note">${isConnected ? 'Bot is online, running smoothly and ready for action! ✨' : 'Check console for pairing code instructions'}</div>
       </div>
     </body>
     </html>
@@ -208,26 +204,51 @@ async function connectToWA() {
       syncFullHistory: false,
       auth: state,
       version,
-      markOnlineOnConnect: true
+      markOnlineOnConnect: true,
+      printQRInTerminal: false
     })
 
     conn.ev.on("connection.update", async (update) => {
-      const { connection, lastDisconnect, qr } = update
+      const { connection, lastDisconnect } = update
 
-      if (qr) {
-        latestQR = await QRCode.toDataURL(qr, {
-          width: 400,
-          margin: 2,
-          color: {
-            dark: "#000000",
-            light: "#ffffff"
-          }
-        })
-
-        connectionStatus = "Scan the QR code now"
-
-        console.log('\nQR available at → http://localhost:' + port)
-        qrcode.generate(qr, { small: true })
+      // Handle pairing code request
+      if (!pairingCodeGenerated && !conn.user && !readlineActive) {
+        const now = Date.now()
+        if (now - lastPairingCodeTime < 60000) {
+          const waitTime = Math.ceil((60000 - (now - lastPairingCodeTime)) / 1000)
+          console.log(`⏳ Please wait ${waitTime} seconds before requesting another pairing code...`)
+        } else {
+          readlineActive = true
+          const readline = require('readline')
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+          })
+          
+          rl.question('\n📱 Enter your WhatsApp phone number (with country code e.g., 26775462914): ', async (phone) => {
+            rl.close()
+            readlineActive = false
+            pairingCodeGenerated = true
+            lastPairingCodeTime = Date.now()
+            
+            try {
+              const code = await conn.requestPairingCode(phone)
+              console.log('\n════════════════════════════════════════')
+              console.log('✅ YOUR PAIRING CODE (Valid for 1 minute):')
+              console.log(`📌 CODE: ${code}`)
+              console.log('════════════════════════════════════════')
+              console.log('📲 On your phone:')
+              console.log('   WhatsApp > Settings > Linked Devices > Link a Device')
+              console.log('   Enter the code above when prompted')
+              console.log('════════════════════════════════════════\n')
+              connectionStatus = `Pairing Code: ${code}`
+            } catch (err) {
+              console.error('❌ Error requesting pairing code:', err.message)
+              pairingCodeGenerated = false
+              connectionStatus = "Error requesting pairing code"
+            }
+          })
+        }
       }
 
       if (connection === "close") {
@@ -252,6 +273,8 @@ async function connectToWA() {
         }
       } 
       else if (connection === 'open') {
+        pairingCodeGenerated = false
+        lastPairingCodeTime = 0
         latestQR = null
         connectionStatus = "Connected ✅"
 
