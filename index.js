@@ -12,6 +12,7 @@ const { getBuffer, getGroupAdmins, getRandom, h2k, isUrl, Json, runtime, sleep, 
 const fs = require('fs')
 const path = require('path')
 const P = require('pino')
+require('dotenv').config()
 const config = require('./config')
 const qrcode = require('qrcode-terminal')
 const QRCode = require('qrcode')
@@ -39,33 +40,57 @@ async function ensureSession() {
     return
   }
 
-  if (!config.SESSION_ID) {
-    console.log("No SESSION_ID found. Will generate QR code...")
+  const envSession = process.env.SESSION_ID || config.SESSION_ID
+
+  if (!envSession) {
+    console.log("No SESSION_ID found in environment or config. Will generate pairing code...")
     return
   }
 
-  console.log('Downloading session from Mega...')
-  const sessdata = config.SESSION_ID.replace("Tsala-X~", '')
+  if (envSession.trim().startsWith('{')) {
+    console.log('Detected raw JSON session from env, saving to creds.json...')
+    try {
+      fs.writeFileSync(credsPath, envSession.trim())
+      console.log("Session saved from JSON ✅")
+      return
+    } catch (err) {
+      console.error('Failed to save session from JSON:', err)
+      return
+    }
+  }
 
-  return new Promise((resolve) => {
-    const filer = File.fromURL(`https://mega.nz/file/${sessdata}`)
-    filer.download((err, data) => {
-      if (err) {
-        console.error('Failed to download session:', err)
-        console.log("Falling back to QR...")
-        return resolve()
-      }
-      fs.writeFile(credsPath, data, (err) => {
+  if (envSession.includes('mega.nz') || envSession.startsWith('Tsala-X~')) {
+    console.log('Downloading session from Mega...')
+    const sessdata = envSession.replace("Tsala-X~", '').trim()
+    const megaUrl = sessdata.startsWith('http') ? sessdata : `https://mega.nz/file/${sessdata}`
+
+    return new Promise((resolve) => {
+      const filer = File.fromURL(megaUrl)
+      filer.download((err, data) => {
         if (err) {
-          console.error('Failed to save session:', err)
-          console.log("Falling back to QR...")
+          console.error('Failed to download session:', err)
+          console.log("Falling back to pairing code...")
           return resolve()
         }
-        console.log("Session downloaded ✅")
-        resolve()
+        fs.writeFile(credsPath, data, (err) => {
+          if (err) {
+            console.error('Failed to save session:', err)
+            console.log("Falling back to pairing code...")
+            return resolve()
+          }
+          console.log("Session downloaded ✅")
+          resolve()
+        })
       })
     })
-  })
+  }
+
+  try {
+    fs.writeFileSync(credsPath, envSession.trim())
+    console.log("Session saved from env string ✅")
+  } catch (err) {
+    console.error('Failed to write env session string:', err)
+  }
 }
 
 //=============================================
@@ -74,7 +99,6 @@ const express = require("express")
 const app = express()
 const port = process.env.PORT || 8000
 
-let latestQR = null
 let connectionStatus = "Starting..."
 let lastPairingCodeTime = 0
 let pairingCodeGenerated = false
@@ -152,18 +176,8 @@ app.get("/", (req, res) => {
           margin-bottom: 24px;
           color: #e2e8f0;
         }
-        .qr-container {
-          background: #ffffff;
-          padding: 16px;
-          border-radius: 16px;
-          display: inline-block;
-          margin-bottom: 20px;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-        }
-        img { width: 100%; max-width: 260px; display: block; border-radius: 8px; }
         .footer-note { color: #64748b; font-size: 13px; line-height: 1.5; }
       </style>
-
     </head>
     <body>
       <div class="card">
@@ -176,11 +190,7 @@ app.get("/", (req, res) => {
         
         <div class="status-box">${connectionStatus}</div>
 
-        <div class="footer-note">
-          ${isConnected 
-            ? 'Bot is online, running smoothly and ready for action! ✨' 
-            : 'Check console logs for pairing code. Watch the Logs section in your hosting panel for the code to appear.'}
-        </div>
+        <div class="footer-note">${isConnected ? 'Bot is online, running smoothly and ready for action! 🚀' : 'Check console for pairing code instructions'}</div>
       </div>
     </body>
     </html>
@@ -189,8 +199,43 @@ app.get("/", (req, res) => {
 
 app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`)
-  console.log(`Open that link to view the stunning control dashboard`)
 })
+
+let cachedGroupJid = null
+
+const GROUP_INVITE = "J0zDV4UQBEx2VOAdq0uZQN"
+const GC_LINK = `https://chat.whatsapp.com/${GROUP_INVITE}`
+const CHANNEL_LINK = "https://whatsapp.com/channel/0029VbDiwEo1XquPafRGOd0B"
+
+async function isUserInGroup(conn, senderJid) {
+  try {
+    if (!cachedGroupJid) {
+      const groupInfo = await conn.groupGetInviteInfo(GROUP_INVITE)
+      cachedGroupJid = groupInfo.id
+    }
+    const metadata = await conn.groupMetadata(cachedGroupJid)
+    const participants = metadata.participants || []
+    const normalizedSender = jidNormalizedUser(senderJid)
+    return participants.some(p => jidNormalizedUser(p.id) === normalizedSender)
+  } catch (err) {
+    console.error("Membership check error:", err)
+    return false
+  }
+}
+
+async function tryAutoJoinGroup(conn, senderJid) {
+  try {
+    if (!cachedGroupJid) {
+      const groupInfo = await conn.groupGetInviteInfo(GROUP_INVITE)
+      cachedGroupJid = groupInfo.id
+    }
+    await conn.groupParticipantsUpdate(cachedGroupJid, [senderJid], "add")
+    return true
+  } catch (err) {
+    console.log("Auto-join failed (normal):", err.message || err)
+    return false
+  }
+}
 
 async function connectToWA() {
   try {
@@ -212,299 +257,222 @@ async function connectToWA() {
       printQRInTerminal: false
     })
 
+    conn.ev.on("creds.update", saveCreds)
+
+    const pluginsDir = path.join(__dirname, 'plugins')
+    if (fs.existsSync(pluginsDir)) {
+      fs.readdirSync(pluginsDir).forEach((file) => {
+        if (path.extname(file).toLowerCase() === '.js') {
+          try {
+            require(path.join(pluginsDir, file))
+          } catch (e) {
+            console.error(`Failed to load plugin ${file}:`, e)
+          }
+        }
+      })
+      console.log("Plugins installed successfully ✅")
+    }
+
     conn.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect } = update
 
-      // Handle pairing code request
-      if (!pairingCodeGenerated && !conn.user && !readlineActive) {
+      if (connection === "open") {
+        console.log("Tsala Yame connected successfully! ✅")
+        connectionStatus = "Connected ✅"
+        pairingCodeGenerated = false
+
+        try {
+          const ownerJid = ownerNumber[0] + "@s.whatsapp.net"
+          await conn.sendMessage(ownerJid, { 
+            text: "🤖 *Tsala Yame is now Connected & Online!* 🚀\n\n_System fully operational._" 
+          })
+        } catch (e) {
+          console.error("Failed to send connection alert to owner:", e)
+        }
+
+      } else if (connection === "close") {
+        const statusCode = lastDisconnect?.error?.output?.statusCode
+        console.log(`Connection closed, reconnecting...`)
+        connectionStatus = "Disconnected, reconnecting..."
+        
+        if (statusCode === DisconnectReason.loggedOut) {
+          console.log("Device logged out. Please provide a valid session.")
+        } else {
+          setTimeout(() => connectToWA(), 5000)
+        }
+      }
+
+      if (!pairingCodeGenerated && !conn.user && !conn.authState.creds.registered && !readlineActive) {
         const now = Date.now()
         if (now - lastPairingCodeTime < 60000) {
           const waitTime = Math.ceil((60000 - (now - lastPairingCodeTime)) / 1000)
           console.log(`⏳ Please wait ${waitTime} seconds before requesting another pairing code...`)
         } else {
-          // Check if we're in an interactive terminal environment
-          const isInteractive = process.stdin.isTTY
+          readlineActive = true
+          const readline = require('readline')
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+          })
           
-          if (isInteractive) {
-            // Local/Interactive environment - ask for phone number
-            readlineActive = true
-            const readline = require('readline')
-            const rl = readline.createInterface({
-              input: process.stdin,
-              output: process.stdout
-            })
-            
-            rl.question('\n📱 Enter your WhatsApp phone number (with country code e.g., 26775462914): ', async (phone) => {
-              rl.close()
-              readlineActive = false
-              pairingCodeGenerated = true
-              lastPairingCodeTime = Date.now()
-              
-              try {
-                const code = await conn.requestPairingCode(phone)
-                console.log('\n════════════════════════════════════════')
-                console.log('✅ YOUR PAIRING CODE (Valid for 1 minute):')
-                console.log(`📌 CODE: ${code}`)
-                console.log('════════════════════════════════════════')
-                console.log('📲 On your phone:')
-                console.log('   WhatsApp > Settings > Linked Devices > Link a Device')
-                console.log('   Enter the code above when prompted')
-                console.log('════════════════════════════════════════\n')
-                connectionStatus = `Pairing Code: ${code}`
-              } catch (err) {
-                console.error('❌ Error requesting pairing code:', err.message)
-                pairingCodeGenerated = false
-                connectionStatus = "Error requesting pairing code"
-              }
-            })
-          } else {
-            // Non-interactive environment (Hosting Platform)
-            console.log('\n════════════════════════════════════════')
-            console.log('🌐 DEPLOYED ON HOSTING PLATFORM DETECTED')
-            console.log('════════════════════════════════════════')
-            console.log('📱 Your pairing code will appear here when ready.')
-            console.log('📲 On your phone:')
-            console.log('   WhatsApp > Settings > Linked Devices > Link a Device')
-            console.log('   Keep this console open and watch for the code.')
-            console.log('════════════════════════════════════════\n')
-            
+          rl.question('\n📱 Enter your WhatsApp phone number (with country code e.g., 26775462914): ', async (phone) => {
+            rl.close()
+            readlineActive = false
             pairingCodeGenerated = true
             lastPairingCodeTime = Date.now()
-            connectionStatus = "Waiting for pairing request..."
-          }
-        }
-      }
-
-      if (connection === "close") {
-        const statusCode = lastDisconnect?.error?.output?.statusCode
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut
-
-        connectionStatus = `Closed (${statusCode}) - Reconnecting...`
-
-        console.log("────────────────────────────────")
-        console.log("Connection closed")
-        console.log("Status Code :", statusCode)
-        console.log("Should reconnect :", shouldReconnect)
-        console.log("Error :", lastDisconnect?.error?.message || lastDisconnect?.error)
-        console.log("────────────────────────────────")
-
-        if (shouldReconnect) {
-          console.log("Reconnecting in 6 seconds...")
-          setTimeout(() => connectToWA(), 6000)
-        } else {
-          connectionStatus = "Logged out. Delete auth_info_baileys folder."
-          console.log("Logged out. Delete the auth_info_baileys folder and start again.")
-        }
-      } 
-      else if (connection === 'open') {
-        pairingCodeGenerated = false
-        lastPairingCodeTime = 0
-        latestQR = null
-        connectionStatus = "Connected ✅"
-
-        console.log('😼 Installing plugins...')
-        
-        let loadedPluginsCount = 0;
-        if (fs.existsSync("./plugins/")) {
-          fs.readdirSync("./plugins/").forEach((plugin) => {
-            if (path.extname(plugin).toLowerCase() === ".js") {
-              try {
-                require("./plugins/" + plugin);
-                loadedPluginsCount++;
-              } catch (pluginErr) {
-                console.error(`Failed to load plugin ${plugin}:`, pluginErr);
-              }
+            
+            try {
+              phone = phone.replace(/[^0-9]/g, '')
+              const code = await conn.requestPairingCode(phone)
+              console.log('\n========================================')
+              console.log('✅ YOUR PAIRING CODE (Valid for 1 minute):')
+              console.log(`📌 CODE: ${code}`)
+              console.log('========================================')
+              console.log('📲 On your phone:')
+              console.log('   WhatsApp > Settings > Linked Devices > Link a Device')
+            } catch (err) {
+              console.error('Failed to request pairing code:', err)
+              pairingCodeGenerated = false
             }
           })
         }
-
-        console.log(`✅ Plugins Loaded: ${loadedPluginsCount}`)
-        console.log('🜢 Tsala Yame connected!');
-
-        const randomImagePool = [
-          config.ALIVE_IMG,
-          'https://files.catbox.moe/lztgy3.png',
-          'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop',
-          'https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=800&auto=format&fit=crop',
-          'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?q=80&w=800&auto=format&fit=crop',
-          'https://picsum.photos/800/800'
-        ].filter(Boolean);
-
-        const selectedAliveImg = randomImagePool[Math.floor(Math.random() * randomImagePool.length)];
-
-        let up = `🌸 *ᴛsᴀʟᴀ ʏᴀᴍᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ* 🌸\n\n> *ʙᴏᴛ ɴᴀᴍᴇ:* ${config.BOT_NAME || "Tsala_Yame"}\n> *ᴏᴡɴᴇʀ:* ${config.OWNER_NAME || "MULAX PRIME"}\n> *ᴜsᴇʀ ᴊɪᴅ:* ${conn.user?.id || "Unknown"}\n> *ᴘʟᴜɢɪɴs:* ${loadedPluginsCount}\n> *ᴘʀᴇғɪx:* ${prefix}\n> *ᴍᴏᴅᴇ:* ${dynamicMode}\n\n*Pᴏᴡᴇʀᴇᴅ ʙʏ Mᴜʟᴀx Pʀɪᴍᴇ*`
-
-        conn.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-          image: { url: selectedAliveImg },
-          caption: up
-        }).catch(err => console.log("Failed to send startup message:", err))
       }
     })
 
-    conn.ev.on('creds.update', saveCreds)
-
     conn.ev.on('messages.upsert', async (mek) => {
-      mek = mek.messages[0]
-      if (!mek.message) return
-
-      mek.message = (getContentType(mek.message) === 'ephemeralMessage')
-        ? mek.message.ephemeralMessage.message
-        : mek.message
-
-      if (mek.key && mek.key.remoteJid === 'status@broadcast' && config.AUTO_READ_STATUS === "true") {
-        await conn.readMessages([mek.key])
-      }
-
-      const m = sms(conn, mek)
-      const type = getContentType(mek.message)
-      const from = mek.key.remoteJid
-      const quoted = type == 'extendedTextMessage' && mek.message.extendedTextMessage.contextInfo != null
-        ? mek.message.extendedTextMessage.contextInfo.quotedMessage || []
-        : []
-      const body = (type === 'conversation')
-        ? mek.message.conversation
-        : (type === 'extendedTextMessage')
-          ? mek.message.extendedTextMessage.text
-          : (type == 'imageMessage') && mek.message.imageMessage.caption
-            ? mek.message.imageMessage.caption
-            : (type == 'videoMessage') && mek.message.videoMessage.caption
-              ? mek.message.videoMessage.caption
-              : ''
-      const isCmd = body.startsWith(prefix)
-      const command = isCmd ? body.slice(prefix.length).trim().split(' ').shift().toLowerCase() : ''
-      const args = body.trim().split(/ +/).slice(1)
-      const q = args.join(' ')
-      const isGroup = from.endsWith('@g.us')
-      const sender = mek.key.fromMe
-        ? (conn.user.id.split(':')[0] + '@s.whatsapp.net' || conn.user.id)
-        : (mek.key.participant || mek.key.remoteJid)
-      const senderNumber = sender.split('@')[0]
-      const botNumber = conn.user.id.split(':')[0]
-      const pushname = mek.pushName || 'Sin Nombre'
-      const isMe = botNumber.includes(senderNumber)
-      const isOwner = ownerNumber.includes(senderNumber) || isMe
-      const botNumber2 = await jidNormalizedUser(conn.user.id)
-      const groupMetadata = isGroup ? await conn.groupMetadata(from).catch(e => {}) : ''
-      const groupName = isGroup ? groupMetadata.subject : ''
-      const participants = isGroup ? await groupMetadata.participants : ''
-      const groupAdmins = isGroup ? await getGroupAdmins(participants) : ''
-      const isBotAdmins = isGroup ? groupAdmins.includes(botNumber2) : false
-      const isAdmins = isGroup ? groupAdmins.includes(sender) : false
-
-      const reply = (teks) => {
-        conn.sendMessage(from, { text: teks }, { quoted: mek })
-      }
-
-      conn.sendFileUrl = async (jid, url, caption, quoted, options = {}) => {
-        let mime = ''
-        let res = await axios.head(url)
-        mime = res.headers['content-type']
-        if (mime.split("/")[1] === "gif") {
-          return conn.sendMessage(jid, { video: await getBuffer(url), caption: caption, gifPlayback: true, ...options }, { quoted: quoted, ...options })
+      try {
+        const events = require('./command')
+        const mekData = mek.messages[0]
+        if (!mekData.message) return
+        if (mekData.key && mekData.key.remoteJid === 'status@broadcast') {
+          if (config.AUTO_READ_STATUS === 'True') {
+            await conn.readMessages([mekData.key])
+          }
+          return
         }
-        if (mime === "application/pdf") {
-          return conn.sendMessage(jid, { document: await getBuffer(url), mimetype: 'application/pdf', caption: caption, ...options }, { quoted: quoted, ...options })
-        }
-        if (mime.split("/")[0] === "image") {
-          return conn.sendMessage(jid, { image: await getBuffer(url), caption: caption, ...options }, { quoted: quoted, ...options })
-        }
-        if (mime.split("/")[0] === "video") {
-          return conn.sendMessage(jid, { video: await getBuffer(url), caption: caption, mimetype: 'video/mp4', ...options }, { quoted: quoted, ...options })
-        }
-        if (mime.split("/")[0] === "audio") {
-          return conn.sendMessage(jid, { audio: await getBuffer(url), caption: caption, mimetype: 'audio/mpeg', ...options }, { quoted: quoted, ...options })
-        }
-      }
+        
+        const m = sms(conn, mekData)
+        const type = getContentType(mekData.message)
+        const body = m.body || ''
+        const from = m.chat
+        const isGroup = m.isGroup
+        const sender = m.sender
+        const senderNumber = sender ? sender.split('@')[0] : ''
+        const botNumber = conn.user?.id ? conn.user.id.split(':')[0] + '@s.whatsapp.net' : ''
+        const botNumber2 = conn.user?.id || ''
+        const pushname = mekData.pushName || 'User'
+        const isMe = m.fromMe || sender === botNumber
+        const isOwner = ownerNumber.includes(senderNumber) || isMe
 
-      if (isCmd && dynamicMode === 'private' && ![botNumber, ...ownerNumber].includes(senderNumber)) {
-        return conn.sendMessage(from, {
-          text: 'Sorry, this bot is running in private mode and you are not authorized to use commands.'
-        }, { quoted: mek })
-      }
+        const isCmd = body.startsWith(prefix)
+        const command = isCmd ? body.slice(prefix.length).trim().split(' ').shift().toLowerCase() : ''
+        const args = body.trim().split(/ +/).slice(1)
+        const q = args.join(' ')
 
-      if (isCmd && command === 'mode') {
-        if (![botNumber, ...ownerNumber].includes(senderNumber)) {
-          return reply('Sorry, only the owner can change the mode.')
-        }
-        if (args.length === 0) {
-          return reply(`Current mode is: ${dynamicMode}\nUsage: ${prefix}mode <public|private>`)
-        }
-        let newMode = args[0].toLowerCase()
-        if (newMode !== 'public' && newMode !== 'private') {
-          return reply('Invalid mode. Please use "public" or "private".')
-        }
-        dynamicMode = newMode
-        return reply(`Bot mode updated to: ${dynamicMode}`)
-      }
+        // Mode check
+        const mode = config.MODE || 'public'
+        if (mode === 'private' && !isOwner && !m.fromMe) return
 
-      const events = require('./command')
-      const cmdName = isCmd ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase() : false
+        // ===== AUTO JOIN + ACCESS CONTROL =====
+        if (isCmd && !isOwner && !m.fromMe) {
+          const inGroup = await isUserInGroup(conn, sender)
 
-      if (isCmd) {
-        const cmd = events.commands.find((cmd) => cmd.pattern === (cmdName)) ||
-                    events.commands.find((cmd) => cmd.alias && cmd.alias.includes(cmdName))
-        if (cmd) {
-          if (cmd.react) conn.sendMessage(from, { react: { text: cmd.react, key: mek.key } })
-          try {
-            cmd.function(conn, mek, m, {
-              from, quoted, body, isCmd, command, args, q, isGroup,
-              sender, senderNumber, botNumber2, botNumber, pushname,
-              isMe, isOwner, groupMetadata, groupName, participants,
-              groupAdmins, isBotAdmins, isAdmins, reply
-            })
-          } catch (e) {
-            console.error("[PLUGIN ERROR] " + e)
+          if (!inGroup) {
+            const added = await tryAutoJoinGroup(conn, sender)
+
+            if (added) {
+              await m.reply(`✅ You have been automatically added to the official group!\n\nPlease also follow the channel:\n${CHANNEL_LINK}`)
+            } else {
+              return await m.reply(
+                `❌ *Access Denied!*\n\n` +
+                `You must join our official support group and follow our channel before using commands.\n\n` +
+                `📌 *Join Official Group:*\n${GC_LINK}\n\n` +
+                `📢 *Follow WhatsApp Channel:*\n${CHANNEL_LINK}\n\n` +
+                `_After joining, try the command again._`
+              )
+            }
           }
         }
-      }
 
-      events.commands.map(async (command) => {
-        if (body && command.on === "body") {
-          command.function(conn, mek, m, {
-            from, quoted, body, isCmd, command, args, q, isGroup,
-            sender, senderNumber, botNumber2, botNumber, pushname,
-            isMe, isOwner, groupMetadata, groupName, participants,
-            groupAdmins, isBotAdmins, isAdmins, reply
-          })
-        } else if (body && command.on === "text") {
-          command.function(conn, mek, m, {
-            from, quoted, body, isCmd, command, args, q, isGroup,
-            sender, senderNumber, botNumber2, botNumber, pushname,
-            isMe, isOwner, groupMetadata, groupName, participants,
-            groupAdmins, isBotAdmins, isAdmins, reply
-          })
-        } else if (
-          (command.on === "image" || command.on === "photo") &&
-          mek.type === "imageMessage"
-        ) {
-          command.function(conn, mek, m, {
-            from, quoted, body, isCmd, command, args, q, isGroup,
-            sender, senderNumber, botNumber2, botNumber, pushname,
-            isMe, isOwner, groupMetadata, groupName, participants,
-            groupAdmins, isBotAdmins, isAdmins, reply
-          })
-        } else if (
-          command.on === "sticker" &&
-          mek.type === "stickerMessage"
-        ) {
-          command.function(conn, mek, m, {
-            from, quoted, body, isCmd, command, args, q, isGroup,
-            sender, senderNumber, botNumber2, botNumber, pushname,
-            isMe, isOwner, groupMetadata, groupName, participants,
-            groupAdmins, isBotAdmins, isAdmins, reply
-          })
+        // ===== FULL CONTEXT (FIXED) =====
+        let groupMetadata = {}
+        let groupName = ''
+        let participants = []
+        let groupAdmins = []
+        let isBotAdmins = false
+        let isAdmins = false
+
+        if (isGroup) {
+          try {
+            groupMetadata = await conn.groupMetadata(from)
+            groupName = groupMetadata.subject || ''
+            participants = groupMetadata.participants || []
+            groupAdmins = await getGroupAdmins(participants)
+            
+            const normalizedBot = jidNormalizedUser(botNumber)
+            const normalizedBot2 = jidNormalizedUser(botNumber2)
+            const normalizedSender = jidNormalizedUser(sender)
+
+            isBotAdmins = groupAdmins.some(admin => 
+              jidNormalizedUser(admin) === normalizedBot || 
+              jidNormalizedUser(admin) === normalizedBot2
+            )
+            isAdmins = groupAdmins.some(admin => jidNormalizedUser(admin) === normalizedSender) || isOwner
+          } catch (err) {
+            console.error("Failed to get group metadata:", err)
+          }
         }
-      })
+
+        const eventsList = events.commands || []
+        for (let cmd of eventsList) {
+          if (cmd.pattern === command || (cmd.alias && cmd.alias.includes(command))) {
+            try {
+              if (cmd.react) {
+                await conn.sendMessage(from, {
+                  react: {
+                    text: cmd.react,
+                    key: mekData.key
+                  }
+                })
+              }
+
+              await cmd.function(conn, mekData, m, {
+                from,
+                quoted: m.quoted,
+                body,
+                isCmd,
+                command,
+                args,
+                q,
+                isGroup,
+                sender,
+                senderNumber,
+                botNumber2,
+                botNumber,
+                pushname,
+                isMe,
+                isOwner,
+                groupMetadata,
+                groupName,
+                participants,
+                groupAdmins,
+                isBotAdmins,
+                isAdmins,
+                reply: async (text) => await m.reply(text)
+              })
+            } catch (e) {
+              console.error(`Error executing command ${command}:`, e)
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error in messages.upsert:', err)
+      }
     })
 
   } catch (err) {
-    console.error("Failed to start connection:", err)
-    connectionStatus = "Error - Retrying..."
-    console.log("Retrying in 10 seconds...")
-    setTimeout(() => connectToWA(), 10000)
+    console.error(err)
   }
 }
 
-setTimeout(() => {
-  connectToWA()
-}, 2000)
+connectToWA()
