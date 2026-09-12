@@ -5,13 +5,15 @@ const {
   jidNormalizedUser,
   getContentType,
   fetchLatestBaileysVersion,
-  Browsers
+  Browsers,
+  makeCacheableSignalKeyStore
 } = require('@whiskeysockets/baileys')
 
 const { getBuffer, getGroupAdmins, getRandom, h2k, isUrl, Json, runtime, sleep, fetchJson } = require('./lib/functions')
 const fs = require('fs')
 const path = require('path')
 const P = require('pino')
+const NodeCache = require('node-cache')
 require('dotenv').config()
 const config = require('./config')
 const qrcode = require('qrcode-terminal')
@@ -25,7 +27,10 @@ const prefix = config.PREFIX || '.'
 const ownerNumber = [config.OWNER_NUMBER || '26775462914']
 let dynamicMode = config.MODE || 'public'
 
-//===================SESSION-AUTH============================
+// =================== CACHES ===================
+const groupCache = new NodeCache({ stdTTL: 5 * 60, useClones: false, checkperiod: 60 })
+
+// =================== SESSION ===================
 const authFolder = path.join(__dirname, 'auth_info_baileys')
 
 async function ensureSession() {
@@ -93,8 +98,7 @@ async function ensureSession() {
   }
 }
 
-//=============================================
-
+// =================== EXPRESS ===================
 const express = require("express")
 const app = express()
 const port = process.env.PORT || 8000
@@ -189,7 +193,6 @@ app.get("/", (req, res) => {
         <p class="subtitle">Powered By Mulax Prime</p>
         
         <div class="status-box">${connectionStatus}</div>
-
         <div class="footer-note">${isConnected ? 'Bot is online, running smoothly and ready for action! 🚀' : 'Check console for pairing code instructions'}</div>
       </div>
     </body>
@@ -201,108 +204,131 @@ app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`)
 })
 
-let cachedGroupJid = null
+// =================== GLOBALS ===================
+let sock = null
+let reconnectAttempts = 0
+const MAX_RECONNECT_ATTEMPTS = 15
+const BASE_RECONNECT_DELAY = 2500
 
-const GROUP_INVITE = "J0zDV4UQBEx2VOAdq0uZQN"
-const GC_LINK = `https://chat.whatsapp.com/${GROUP_INVITE}`
-const CHANNEL_LINK = "https://whatsapp.com/channel/0029VbDiwEo1XquPafRGOd0B"
-
-async function isUserInGroup(conn, senderJid) {
-  try {
-    if (!cachedGroupJid) {
-      const groupInfo = await conn.groupGetInviteInfo(GROUP_INVITE)
-      cachedGroupJid = groupInfo.id
+// =================== LOAD PLUGINS ONCE ===================
+const events = require('./command')
+const pluginsDir = path.join(__dirname, 'plugins')
+if (fs.existsSync(pluginsDir)) {
+  fs.readdirSync(pluginsDir).forEach((file) => {
+    if (path.extname(file).toLowerCase() === '.js') {
+      try {
+        require(path.join(pluginsDir, file))
+      } catch (e) {
+        console.error(`Failed to load plugin ${file}:`, e)
+      }
     }
-    const metadata = await conn.groupMetadata(cachedGroupJid)
-    const participants = metadata.participants || []
-    const normalizedSender = jidNormalizedUser(senderJid)
-    return participants.some(p => jidNormalizedUser(p.id) === normalizedSender)
-  } catch (err) {
-    console.error("Membership check error:", err)
-    return false
-  }
+  })
+  console.log("Plugins installed successfully ✅")
 }
 
-async function tryAutoJoinGroup(conn, senderJid) {
-  try {
-    if (!cachedGroupJid) {
-      const groupInfo = await conn.groupGetInviteInfo(GROUP_INVITE)
-      cachedGroupJid = groupInfo.id
-    }
-    await conn.groupParticipantsUpdate(cachedGroupJid, [senderJid], "add")
-    return true
-  } catch (err) {
-    console.log("Auto-join failed (normal):", err.message || err)
-    return false
-  }
-}
-
+// =================== CONNECT ===================
 async function connectToWA() {
   try {
     await ensureSession()
 
-    console.log("Connecting Tsala Yame...");
+    console.log("Connecting Tsala Yame...")
     connectionStatus = "Connecting..."
+
+    if (sock) {
+      try {
+        sock.ev.removeAllListeners()
+        sock.end(undefined)
+      } catch {}
+      sock = null
+    }
 
     const { state, saveCreds } = await useMultiFileAuthState(authFolder)
     const { version } = await fetchLatestBaileysVersion()
+    const logger = P({ level: 'silent' })
 
-    const conn = makeWASocket({
-      logger: P({ level: 'silent' }),
+    sock = makeWASocket({
+      logger,
       browser: Browsers.macOS("Firefox"),
       syncFullHistory: false,
-      auth: state,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger)
+      },
       version,
       markOnlineOnConnect: true,
-      printQRInTerminal: false
+      printQRInTerminal: false,
+      cachedGroupMetadata: async (jid) => groupCache.get(jid),
     })
 
-    conn.ev.on("creds.update", saveCreds)
+    sock.ev.on("creds.update", saveCreds)
 
-    const pluginsDir = path.join(__dirname, 'plugins')
-    if (fs.existsSync(pluginsDir)) {
-      fs.readdirSync(pluginsDir).forEach((file) => {
-        if (path.extname(file).toLowerCase() === '.js') {
-          try {
-            require(path.join(pluginsDir, file))
-          } catch (e) {
-            console.error(`Failed to load plugin ${file}:`, e)
-          }
-        }
-      })
-      console.log("Plugins installed successfully ✅")
-    }
+    // Keep group cache warm
+    sock.ev.on('groups.update', async (updates) => {
+      for (const update of updates) {
+        try {
+          const metadata = await sock.groupMetadata(update.id)
+          groupCache.set(update.id, metadata)
+        } catch {}
+      }
+    })
 
-    conn.ev.on("connection.update", async (update) => {
-      const { connection, lastDisconnect } = update
+    sock.ev.on('group-participants.update', async (event) => {
+      try {
+        const metadata = await sock.groupMetadata(event.id)
+        groupCache.set(event.id, metadata)
+      } catch {}
+    })
+
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect, qr } = update
 
       if (connection === "open") {
         console.log("Tsala Yame connected successfully! ✅")
         connectionStatus = "Connected ✅"
         pairingCodeGenerated = false
+        reconnectAttempts = 0
 
         try {
           const ownerJid = ownerNumber[0] + "@s.whatsapp.net"
-          await conn.sendMessage(ownerJid, { 
-            text: "🤖 *Tsala Yame is now Connected & Online!* 🚀\n\n_System fully operational._" 
+          await sock.sendMessage(ownerJid, {
+            text: "🤖 *Tsala Yame is now Connected & Online!* 🚀\n\n_System fully operational._"
           })
         } catch (e) {
-          console.error("Failed to send connection alert to owner:", e)
+          console.error("Failed to send connection alert to owner:", e.message)
         }
-
-      } else if (connection === "close") {
-        const statusCode = lastDisconnect?.error?.output?.statusCode
-        console.log(`Connection closed, reconnecting...`)
-        connectionStatus = "Disconnected, reconnecting..."
-        
-        if (statusCode === DisconnectReason.loggedOut) {
-          console.log("Device logged out. Please provide a valid session.")
-        } else {
-          setTimeout(() => connectToWA(), 5000)
-        }
+        return
       }
 
-      if (!pairingCodeGenerated && !conn.user && !conn.authState.creds.registered && !readlineActive) {
+      if (connection === "close") {
+        const statusCode = lastDisconnect?.error?.output?.statusCode
+        const reason = lastDisconnect?.error?.message || 'unknown'
+        console.log(`Connection closed → code: ${statusCode ?? 'unknown'} | reason: ${reason}`)
+        connectionStatus = "Disconnected, reconnecting..."
+
+        if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+          console.log("❌ Device logged out. Session invalid. Stopping reconnects.")
+          connectionStatus = "Logged out"
+          return
+        }
+
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          console.log(`❌ Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Stopping.`)
+          connectionStatus = "Max reconnects reached"
+          return
+        }
+
+        const delay = Math.min(
+          BASE_RECONNECT_DELAY * Math.pow(1.7, reconnectAttempts) + Math.random() * 1000,
+          60000
+        )
+        reconnectAttempts++
+
+        console.log(`Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
+        setTimeout(() => connectToWA(), delay)
+        return
+      }
+
+      if (!pairingCodeGenerated && !sock.user && !sock.authState?.creds?.registered && !readlineActive) {
         const now = Date.now()
         if (now - lastPairingCodeTime < 60000) {
           const waitTime = Math.ceil((60000 - (now - lastPairingCodeTime)) / 1000)
@@ -314,18 +340,18 @@ async function connectToWA() {
             input: process.stdin,
             output: process.stdout
           })
-          
+
           rl.question('\n📱 Enter your WhatsApp phone number (with country code e.g., 26775462914): ', async (phone) => {
             rl.close()
             readlineActive = false
             pairingCodeGenerated = true
             lastPairingCodeTime = Date.now()
-            
+
             try {
               phone = phone.replace(/[^0-9]/g, '')
-              const code = await conn.requestPairingCode(phone)
+              const code = await sock.requestPairingCode(phone)
               console.log('\n========================================')
-              console.log('✅ YOUR PAIRING CODE (Valid for 1 minute):')
+              console.log('✅ YOUR PAIRING CODE (Valid for ~1 minute):')
               console.log(`📌 CODE: ${code}`)
               console.log('========================================')
               console.log('📲 On your phone:')
@@ -339,27 +365,27 @@ async function connectToWA() {
       }
     })
 
-    conn.ev.on('messages.upsert', async (mek) => {
+    // =================== MESSAGE HANDLER ===================
+    sock.ev.on('messages.upsert', async (mek) => {
       try {
-        const events = require('./command')
         const mekData = mek.messages[0]
-        if (!mekData.message) return
+        if (!mekData || !mekData.message) return
         if (mekData.key && mekData.key.remoteJid === 'status@broadcast') {
           if (config.AUTO_READ_STATUS === 'True') {
-            await conn.readMessages([mekData.key])
+            await sock.readMessages([mekData.key])
           }
           return
         }
-        
-        const m = sms(conn, mekData)
+
+        const m = sms(sock, mekData)
         const type = getContentType(mekData.message)
         const body = m.body || ''
         const from = m.chat
         const isGroup = m.isGroup
         const sender = m.sender
         const senderNumber = sender ? sender.split('@')[0] : ''
-        const botNumber = conn.user?.id ? conn.user.id.split(':')[0] + '@s.whatsapp.net' : ''
-        const botNumber2 = conn.user?.id || ''
+        const botNumber = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : ''
+        const botNumber2 = sock.user?.id || ''
         const pushname = mekData.pushName || 'User'
         const isMe = m.fromMe || sender === botNumber
         const isOwner = ownerNumber.includes(senderNumber) || isMe
@@ -369,32 +395,12 @@ async function connectToWA() {
         const args = body.trim().split(/ +/).slice(1)
         const q = args.join(' ')
 
-        // Mode check
+        if (!isCmd && !m.fromMe && !body.trim()) return
+
         const mode = config.MODE || 'public'
         if (mode === 'private' && !isOwner && !m.fromMe) return
 
-        // ===== AUTO JOIN + ACCESS CONTROL =====
-        if (isCmd && !isOwner && !m.fromMe) {
-          const inGroup = await isUserInGroup(conn, sender)
-
-          if (!inGroup) {
-            const added = await tryAutoJoinGroup(conn, sender)
-
-            if (added) {
-              await m.reply(`✅ You have been automatically added to the official group!\n\nPlease also follow the channel:\n${CHANNEL_LINK}`)
-            } else {
-              return await m.reply(
-                `❌ *Access Denied!*\n\n` +
-                `You must join our official support group and follow our channel before using commands.\n\n` +
-                `📌 *Join Official Group:*\n${GC_LINK}\n\n` +
-                `📢 *Follow WhatsApp Channel:*\n${CHANNEL_LINK}\n\n` +
-                `_After joining, try the command again._`
-              )
-            }
-          }
-        }
-
-        // ===== FULL CONTEXT (FIXED) =====
+        // Group context
         let groupMetadata = {}
         let groupName = ''
         let participants = []
@@ -404,31 +410,71 @@ async function connectToWA() {
 
         if (isGroup) {
           try {
-            groupMetadata = await conn.groupMetadata(from)
+            groupMetadata = groupCache.get(from) || await sock.groupMetadata(from)
+            if (!groupCache.has(from)) groupCache.set(from, groupMetadata)
+
             groupName = groupMetadata.subject || ''
             participants = groupMetadata.participants || []
             groupAdmins = await getGroupAdmins(participants)
-            
+
             const normalizedBot = jidNormalizedUser(botNumber)
             const normalizedBot2 = jidNormalizedUser(botNumber2)
             const normalizedSender = jidNormalizedUser(sender)
 
-            isBotAdmins = groupAdmins.some(admin => 
-              jidNormalizedUser(admin) === normalizedBot || 
+            isBotAdmins = groupAdmins.some(admin =>
+              jidNormalizedUser(admin) === normalizedBot ||
               jidNormalizedUser(admin) === normalizedBot2
             )
             isAdmins = groupAdmins.some(admin => jidNormalizedUser(admin) === normalizedSender) || isOwner
           } catch (err) {
-            console.error("Failed to get group metadata:", err)
+            // Silent fail - no more spam
           }
         }
 
         const eventsList = events.commands || []
+
+        // ========== 1. RUN "on" TYPE HANDLERS FIRST (Chatbot etc) ==========
+        for (let cmd of eventsList) {
+          if (cmd.on === "text" || cmd.on === "body" || cmd.on === "message") {
+            try {
+              await cmd.function(sock, mekData, m, {
+                from,
+                quoted: m.quoted,
+                body,
+                isCmd,
+                command,
+                args,
+                q,
+                isGroup,
+                sender,
+                senderNumber,
+                botNumber2,
+                botNumber,
+                pushname,
+                isMe,
+                isOwner,
+                groupMetadata,
+                groupName,
+                participants,
+                groupAdmins,
+                isBotAdmins,
+                isAdmins,
+                reply: async (text) => await m.reply(text)
+              })
+            } catch (e) {
+              console.error("Error in on-handler:", e)
+            }
+          }
+        }
+
+        // ========== 2. NORMAL COMMANDS ==========
+        if (!isCmd) return
+
         for (let cmd of eventsList) {
           if (cmd.pattern === command || (cmd.alias && cmd.alias.includes(command))) {
             try {
               if (cmd.react) {
-                await conn.sendMessage(from, {
+                await sock.sendMessage(from, {
                   react: {
                     text: cmd.react,
                     key: mekData.key
@@ -436,7 +482,7 @@ async function connectToWA() {
                 })
               }
 
-              await cmd.function(conn, mekData, m, {
+              await cmd.function(sock, mekData, m, {
                 from,
                 quoted: m.quoted,
                 body,
@@ -471,8 +517,13 @@ async function connectToWA() {
     })
 
   } catch (err) {
-    console.error(err)
+    console.error("Fatal connect error:", err)
+    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      reconnectAttempts++
+      setTimeout(connectToWA, 5000)
+    }
   }
 }
 
+// Start
 connectToWA()

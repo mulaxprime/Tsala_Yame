@@ -1,27 +1,12 @@
 const { cmd } = require('../command');
 const config = require('../config');
-const fs = require('fs');
-const path = require('path');
 const { tiny } = require("../lib/fancy_font/fancy");
 const axios = require('axios');
+const { downloadMediaMessage, getContentType } = require('@whiskeysockets/baileys');
+const fs = require('fs');
+const path = require('path');
 
-// Helper to grab a random photo for the card layout
-function getRandomPhoto() {
-    const photosDir = path.join(__dirname, '../lib/photos');
-    if (!fs.existsSync(photosDir)) return null;
-    
-    const validExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
-    const photoFiles = fs.readdirSync(photosDir).filter(file => 
-        validExtensions.includes(path.extname(file).toLowerCase())
-    );
-    
-    if (photoFiles.length === 0) return null;
-    
-    const randomFile = photoFiles[Math.floor(Math.random() * photoFiles.length)];
-    return path.join(photosDir, randomFile);
-}
-
-// Command to toggle or check status of the chatbot
+// ==================== CHATBOT TOGGLE ====================
 cmd({
     pattern: "chatbot",
     desc: "Turn auto chatbot on or off",
@@ -29,78 +14,134 @@ cmd({
     filename: __filename
 }, async (conn, mek, m, { from, args, isOwner, reply }) => {
     if (!isOwner) return reply(tiny("Only the owner can use this command!"));
-    
+
     const status = args[0] ? args[0].toLowerCase() : '';
+
     if (status === 'on') {
         config.AUTO_CHATBOT = "true";
-        return reply(tiny("🤖 Auto Chatbot has been turned ON."));
-    } else if (status === 'off') {
+        return reply(tiny("🤖 Auto Chatbot has been turned *ON*."));
+    } 
+    
+    if (status === 'off') {
         config.AUTO_CHATBOT = "false";
-        return reply(tiny("🤖 Auto Chatbot has been turned OFF."));
-    } else {
-        return reply(tiny(`🤖 Auto Chatbot Status: *${config.AUTO_CHATBOT}*\nUse \`.chatbot on\` or \`.chatbot off\` to change it.`));
+        return reply(tiny("🤖 Auto Chatbot has been turned *OFF*."));
+    }
+
+    return reply(tiny(
+        `🤖 *Auto Chatbot Status:* ${config.AUTO_CHATBOT || "false"}\n\n` +
+        `Use:\n.chatbot on\n.chatbot off`
+    ));
+});
+
+// ==================== VIEW ONCE RECOVERY ====================
+cmd({
+    pattern: "vv",
+    alias: ["viewonce", "vo", "reveal"],
+    desc: "Recover View Once message (reply to it)",
+    category: "utility",
+    filename: __filename
+}, async (conn, mek, m, { from, quoted, isOwner, reply }) => {
+    try {
+        if (!quoted) {
+            return reply(tiny("Reply to a *View Once* message with `.vv`"));
+        }
+
+        // Get the real quoted message
+        let msg = quoted.message || quoted;
+        let type = getContentType(msg);
+
+        // Unwrap viewOnce wrappers
+        if (type === "viewOnceMessage" || type === "viewOnceMessageV2" || type === "viewOnceMessageV2Extension") {
+            msg = msg[type].message;
+            type = getContentType(msg);
+        }
+
+        // Also handle cases where viewOnce flag is on the media itself
+        const mediaMsg = msg[type];
+        if (!mediaMsg) {
+            return reply(tiny("This is not a valid View Once media message."));
+        }
+
+        // Download the media
+        const buffer = await downloadMediaMessage(
+            { message: msg, key: quoted.key || mek.key },
+            "buffer",
+            {},
+            { logger: console, reuploadRequest: conn.updateMediaMessage }
+        );
+
+        if (!buffer) {
+            return reply(tiny("Failed to download the media."));
+        }
+
+        const caption = mediaMsg.caption ? `*Recovered View Once*\n\n${mediaMsg.caption}` : "*Recovered View Once Message*";
+
+        if (type === "imageMessage") {
+            await conn.sendMessage(from, {
+                image: buffer,
+                caption: caption
+            }, { quoted: mek });
+        } 
+        else if (type === "videoMessage") {
+            await conn.sendMessage(from, {
+                video: buffer,
+                caption: caption
+            }, { quoted: mek });
+        } 
+        else if (type === "audioMessage") {
+            await conn.sendMessage(from, {
+                audio: buffer,
+                mimetype: "audio/mp4",
+                ptt: mediaMsg.ptt || false
+            }, { quoted: mek });
+        } 
+        else {
+            return reply(tiny("Unsupported View Once type."));
+        }
+
+    } catch (err) {
+        console.error("ViewOnce Error:", err);
+        reply(tiny("Failed to recover View Once message.\nMake sure you replied to a valid View Once media."));
     }
 });
 
-// Event Listener for Incoming Messages (Auto-Reply Engine using David Cyril Gemini AI Endpoint)
+// ==================== AUTO CHATBOT (Private chats only) ====================
 cmd({
     on: "text"
-}, async (conn, mek, m, { from, body, sender, isGroup, isMe }) => {
+}, async (conn, mek, m, { from, body, sender, isGroup, isMe, isOwner }) => {
     try {
-        // Skip if chatbot is disabled, message is from bot itself, or if it's a command
-        if (config.AUTO_CHATBOT !== "true" || isMe) return;
+        // Safety checks
+        if (config.AUTO_CHATBOT !== "true") return;
+        if (isMe) return;
+        if (isGroup) return;                         // Only work in private chats
+        if (!body || body.trim().length < 1) return;
         if (body.startsWith(config.PREFIX || ".")) return;
 
-        // Optional: Restrict auto-reply strictly to private chats (DMs) so it doesn't spam groups
-        if (isGroup) return; 
-
-        // Generate response using David Cyril Gemini AI endpoint based on the correct /ai/gemini-3.1-flash-lite route
+        // Call AI
         let replyText = "";
         try {
-            const apiRes = await axios.get(`https://apis.davidcyril.name.ng/ai/gemini-3.1-flash-lite?prompt=${encodeURIComponent(body)}`);
+            const apiRes = await axios.get(
+                `https://apis.davidcyril.name.ng/ai/gemini-3.1-flash-lite?prompt=${encodeURIComponent(body)}`,
+                { timeout: 10000, validateStatus: () => true }
+            );
+
             const data = apiRes.data;
-            replyText = data.result || data.data || data.response || data.answer || "Hey! Mulax Prime is currently offline right now, but I have received your message and will pass it along as soon as they are back!";
-        } catch {
-            replyText = "Hello! Mulax Prime is currently offline. Your message has been saved, and they will get back to you shortly.";
-        }
+            replyText = data?.result || data?.data || data?.response || data?.answer || null;
 
-        const infoText = 
-`│ 🤖 *Auto Response*
-│
-│ ${replyText}`;
-
-        const cardContent = 
-            `╭───〔 🌸 *Tsala Bot* 🌸 〕───⬣\n${infoText}\n╰──────────────────────⬣\n> *✨ Tsala Yame | Pᴏᴡᴇʀᴇᴅ ʙʏ Mᴜʟᴀx Pʀɪᴍᴇ*`;
-
-        const styledText = tiny(cardContent);
-        const photoPath = getRandomPhoto();
-
-        const contextInfo = {
-            mentionedJid: [sender],
-            forwardingScore: 9999,
-            isForwarded: true,
-            forwardedNewsletterMessageInfo: {
-                newsletterJid: '120363412950068938@newsletter',
-                newsletterName: '⏤͟͟͞͞Tsala Yame  ͟͞͞⏤'
-            },
-            externalAdReply: {
-                showAdAttribution: false,
-                containsAutoReply: true,
-                title: "✧ Tsala Auto-Chatbot ✧",
-                body: "Owner is currently away",
-                thumbnailUrl: "https://files.catbox.moe/bt7a3x.jpeg",
-                sourceUrl: "https://github.com/mulaxprime/Tsala_Yame",
-                mediaType: 1,
-                renderLargerThumbnail: true
+            if (!replyText || typeof replyText !== "string") {
+                replyText = "I'm having trouble thinking right now. Please try again later.";
             }
-        };
-
-        if (photoPath && fs.existsSync(photoPath)) {
-            const imageBuffer = fs.readFileSync(photoPath);
-            await conn.sendMessage(from, { image: imageBuffer, caption: styledText, contextInfo }, { quoted: mek });
-        } else {
-            await conn.sendMessage(from, { text: styledText, contextInfo }, { quoted: mek });
+        } catch (e) {
+            replyText = "Sorry, the AI is currently offline. Please try again in a moment.";
         }
+
+        // Clean response
+        replyText = replyText.trim();
+
+        // Send nice reply
+        await conn.sendMessage(from, {
+            text: replyText
+        }, { quoted: mek });
 
     } catch (err) {
         console.error("Chatbot Error:", err);
