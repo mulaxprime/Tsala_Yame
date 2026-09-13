@@ -4,9 +4,7 @@
   "description": "Tsala Yame WhatsApp bot created using Node.js",
   "main": "index.js",
   "scripts": {
-    "start": "pm2 start index.js --deep-monitoring --attach --name tsala-yame",
-    "stop": "pm2 stop tsala-yame",
-    "restart": "pm2 restart tsala-yame"
+    "start": "node index.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",
