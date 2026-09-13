@@ -20,8 +20,8 @@ cmd({
     if (status === 'on') {
         config.AUTO_CHATBOT = "true";
         return reply(tiny("🤖 Auto Chatbot has been turned *ON*."));
-    } 
-    
+    }
+
     if (status === 'off') {
         config.AUTO_CHATBOT = "false";
         return reply(tiny("🤖 Auto Chatbot has been turned *OFF*."));
@@ -80,20 +80,20 @@ cmd({
                 image: buffer,
                 caption: caption
             }, { quoted: mek });
-        } 
+        }
         else if (type === "videoMessage") {
             await conn.sendMessage(from, {
                 video: buffer,
                 caption: caption
             }, { quoted: mek });
-        } 
+        }
         else if (type === "audioMessage") {
             await conn.sendMessage(from, {
                 audio: buffer,
                 mimetype: "audio/mp4",
                 ptt: mediaMsg.ptt || false
             }, { quoted: mek });
-        } 
+        }
         else {
             return reply(tiny("Unsupported View Once type."));
         }
@@ -104,28 +104,38 @@ cmd({
     }
 });
 
-// ==================== AUTO CHATBOT - DEBUG VERSION ====================
+// ==================== AUTO CHATBOT (loop-safe) ====================
+// Tracks message IDs the bot itself sends, so that in a self-chat
+// ("Message yourself") the bot's own auto-reply doesn't trigger
+// another auto-reply, causing an infinite loop.
+const sentByBot = new Set();
+
 cmd({
     on: "text"
-}, async (conn, mek, m, { from, body, isGroup, isMe }) => {
-    console.log("========== CHATBOT HANDLER FIRED ==========");
-    console.log("AUTO_CHATBOT:", config.AUTO_CHATBOT);
-    console.log("Body:", body);
-    console.log("isGroup:", isGroup);
-    console.log("isMe:", isMe);
-    console.log("from:", from);
-
-    // Temporary: Reply to EVERY private message for testing
+}, async (conn, mek, m, { from, body, isGroup }) => {
     if (isGroup) return;
     if (!body) return;
     if (body.startsWith(".")) return;
+    if (config.AUTO_CHATBOT !== "true") return; // respects .chatbot on/off
+
+    // Skip if this incoming message is actually the bot's own
+    // reply looping back around (happens in self-chat).
+    if (mek.key && mek.key.id && sentByBot.has(mek.key.id)) {
+        sentByBot.delete(mek.key.id);
+        return;
+    }
 
     try {
-        await conn.sendMessage(from, {
+        const sent = await conn.sendMessage(from, {
             text: `Chatbot received: ${body}`
         }, { quoted: mek });
-        console.log("Test reply sent successfully");
+
+        if (sent && sent.key && sent.key.id) {
+            sentByBot.add(sent.key.id);
+            // Safety cleanup in case the ID is never seen again
+            setTimeout(() => sentByBot.delete(sent.key.id), 60000);
+        }
     } catch (e) {
-        console.error("Failed to send test reply:", e);
+        console.error("Failed to send chatbot reply:", e);
     }
 });
