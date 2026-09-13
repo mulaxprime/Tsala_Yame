@@ -56,7 +56,6 @@ cmd({
             type = getContentType(msg);
         }
 
-        // Also handle cases where viewOnce flag is on the media itself
         const mediaMsg = msg[type];
         if (!mediaMsg) {
             return reply(tiny("This is not a valid View Once media message."));
@@ -105,45 +104,28 @@ cmd({
     }
 });
 
-// ==================== AUTO CHATBOT (Private chats only) ====================
+// ==================== AUTO CHATBOT - DEBUG VERSION ====================
 cmd({
     on: "text"
-}, async (conn, mek, m, { from, body, sender, isGroup, isMe, isOwner }) => {
+}, async (conn, mek, m, { from, body, isGroup, isMe }) => {
+    console.log("========== CHATBOT HANDLER FIRED ==========");
+    console.log("AUTO_CHATBOT:", config.AUTO_CHATBOT);
+    console.log("Body:", body);
+    console.log("isGroup:", isGroup);
+    console.log("isMe:", isMe);
+    console.log("from:", from);
+
+    // Temporary: Reply to EVERY private message for testing
+    if (isGroup) return;
+    if (!body) return;
+    if (body.startsWith(".")) return;
+
     try {
-        // Safety checks
-        if (config.AUTO_CHATBOT !== "true") return;
-        if (isMe) return;
-        if (isGroup) return;                         // Only work in private chats
-        if (!body || body.trim().length < 1) return;
-        if (body.startsWith(config.PREFIX || ".")) return;
-
-        // Call AI
-        let replyText = "";
-        try {
-            const apiRes = await axios.get(
-                `https://apis.davidcyril.name.ng/ai/gemini-3.1-flash-lite?prompt=${encodeURIComponent(body)}`,
-                { timeout: 10000, validateStatus: () => true }
-            );
-
-            const data = apiRes.data;
-            replyText = data?.result || data?.data || data?.response || data?.answer || null;
-
-            if (!replyText || typeof replyText !== "string") {
-                replyText = "I'm having trouble thinking right now. Please try again later.";
-            }
-        } catch (e) {
-            replyText = "Sorry, the AI is currently offline. Please try again in a moment.";
-        }
-
-        // Clean response
-        replyText = replyText.trim();
-
-        // Send nice reply
         await conn.sendMessage(from, {
-            text: replyText
+            text: `Chatbot received: ${body}`
         }, { quoted: mek });
-
-    } catch (err) {
-        console.error("Chatbot Error:", err);
+        console.log("Test reply sent successfully");
+    } catch (e) {
+        console.error("Failed to send test reply:", e);
     }
 });
