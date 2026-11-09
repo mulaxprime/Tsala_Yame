@@ -15,7 +15,7 @@
 ---
 
 <p align="center">
-  <img src="https://files.catbox.moe/lztgy3.png" alt="Tsala Yame Preview" width="85%" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+  <img src="https://files.catbox.moe/lztgy3.png" alt="Tsala Yame Bot  Preview" width="85%" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
 </p>
 
 ---
